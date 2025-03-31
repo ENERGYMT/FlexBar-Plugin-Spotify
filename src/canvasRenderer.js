@@ -368,6 +368,7 @@ async function createModernNowPlayingCanvas(config) {
         titleFontSize = 18,
         artistFontSize = 14,
         timeFontSize = 10, // Add default timeFontSize parameter
+        progressBarColor = '#1DB954', // Add default progressBarColor parameter
         options = {} // Destructure the nested options object as well
     } = config; // Destructure from the single argument
 
@@ -500,10 +501,12 @@ async function createModernNowPlayingCanvas(config) {
             roundedRect(ctx, padding, progressBarY, width - (padding * 2), progressBarHeight, progressBarRadius);
             ctx.fill();
             
-            // Draw progress fill
-            ctx.fillStyle = accentColor;
+            // Draw progress fill - use progressBarColor parameter with direct assignment
+            ctx.fillStyle = progressBarColor;
+            
             const progressRatio = Math.min(1, Math.max(0, progress / duration)); 
             const progressWidth = (width - (padding * 2)) * progressRatio; // Calculate width based on indented bar
+            
             if (progressWidth > 0) {
                  roundedRect(ctx, padding, progressBarY, progressWidth, progressBarHeight, progressBarRadius);
                  ctx.fill();
@@ -634,26 +637,40 @@ async function createModernNowPlayingCanvas(config) {
  */
 async function createSpotifyButtonDataUrl(width, trackName, artistName, isPlaying, albumArtUrl, progress, duration, style = {}, showProgress = true, showTitle = true, showPlayPause = true, titleFontSize = 18, artistFontSize = 14, showTimeInfo = true, timeFontSize = 10, options = {}) {
     try {
-        const { backgroundColor = '#1E1E1E', accentColor = '#1DB954' } = style; // Use style from args
+        // CRITICAL: Extract progressBarColor from style DIRECTLY
+        // Don't rely on destructuring with default values
+        let progressBarColor = '#1DB954'; // Default Spotify green
         
-        const canvas = await createModernNowPlayingCanvas({ // Call the canvas generator
+        // Check if progressBarColor exists in style and is non-empty
+        if (style && style.progressBarColor) {
+            progressBarColor = style.progressBarColor;
+        }
+        
+        // For debugging only - extract other style properties
+        const backgroundColor = style.backgroundColor || '#1E1E1E';
+        const accentColor = style.accentColor || '#1DB954';
+        
+        // IMPORTANT: Use this progressBarColor directly in createModernNowPlayingCanvas
+        const canvas = await createModernNowPlayingCanvas({
             width,
             height: 60, // Standard height
             trackName,
             artistName,
             isPlaying,
-            accentColor, // Pass accent color
+            accentColor, 
             albumArtUrl,
             progress,
             duration,
             showProgress,
             showTitle,
             showPlayPause,
-            showTimeInfo, // Pass showTimeInfo parameter
+            showTimeInfo,
             titleFontSize, 
             artistFontSize,
-            timeFontSize, // Pass timeFontSize parameter
-            options // Pass options through
+            timeFontSize,
+            // CRITICAL: Pass through the progressBarColor directly
+            progressBarColor, 
+            options
         });
 
         // Convert the resulting canvas to Data URL
@@ -686,7 +703,7 @@ let currentPlaybackState = {
 async function renderInterpolatedNowPlaying(serialNumber, key) {
     const keyUid = key.uid;
     const keyId = `${serialNumber}-${keyUid}`;
-    logger.info(`Rendering interpolated state for key: ${keyId}`);
+    logger.debug(`Rendering interpolated state for key: ${keyId}`);
 
     const currentKeyData = keyManager.keyData[keyUid];
     if (!currentKeyData || !currentKeyData.data) {
@@ -695,6 +712,7 @@ async function renderInterpolatedNowPlaying(serialNumber, key) {
         return;
     }
 
+    // Extract data from the current key state
     const {
         currentTrackDetails, // Stores details from the last API call
         lastApiUpdateTime,
@@ -706,10 +724,9 @@ async function renderInterpolatedNowPlaying(serialNumber, key) {
         showTimeInfo,
         titleFontSize,
         artistFontSize,
-        timeFontSize // Add timeFontSize
+        timeFontSize,
+        progressBarColor // Extract progressBarColor directly from keyData
     } = currentKeyData.data;
-
-    logger.info(`[renderInterpolatedNowPlaying] Key ${keyId} - Using configured timeFontSize: ${timeFontSize} (type: ${typeof timeFontSize})`);
 
     const isPlaying = currentPlaybackState.isPlaying; // Use global state for playing status
     let estimatedProgress = progressAtLastUpdate;
@@ -732,7 +749,6 @@ async function renderInterpolatedNowPlaying(serialNumber, key) {
          estimatedProgress = 0; // Default to 0 if no data yet
      }
 
-
     const isActive = !!(currentTrackDetails); // Active if we have track details
 
     try {
@@ -742,6 +758,15 @@ async function renderInterpolatedNowPlaying(serialNumber, key) {
         const title = decodeHtmlEntities(currentTrackDetails?.name || 'Nothing Playing');
         const artist = decodeHtmlEntities(currentTrackDetails?.artists?.map(a => a.name).join(', ') || '');
 
+        // Create a NEW style object that FORCES the progressBarColor from key.data
+        const renderStyle = {
+            // Start with minimal required properties instead of inheriting everything
+            width: currentKeyData.width || 360,
+            showImage: true,
+            // Force progressBarColor to match the one in key.data
+            progressBarColor: progressBarColor
+        };
+
         const buttonDataUrl = await renderer.createSpotifyButtonDataUrl(
             currentKeyData.width || 360,
             title,
@@ -750,14 +775,14 @@ async function renderInterpolatedNowPlaying(serialNumber, key) {
             imageUrl,
             Math.round(estimatedProgress), // Use rounded interpolated progress
             durationMs, // Use stored duration
-            currentKeyData.style || {},
+            renderStyle, // Pass the minimal style object with FORCED progressBarColor
             showProgress,
             showTitle,
             showPlayPause,
             titleFontSize,
             artistFontSize,
             showTimeInfo,
-            timeFontSize, // Add timeFontSize
+            timeFontSize,
             {} // Empty options obj -> defaults to nowPlaying
         );
         keyManager.simpleDraw(serialNumber, currentKeyData, buttonDataUrl);
@@ -776,10 +801,16 @@ async function initializeNowPlayingKey(serialNumber, key) {
     const keyId = `${serialNumber}-${keyUid}`;
     logger.info('Initializing nowplaying key:', keyId);
 
-    // Log the initial timeFontSize from the incoming data (convert to string for logging)
-    const initialTimeFontSize = key.data?.timeFontSize;
-    logger.info(`[initializeNowPlayingKey] Initial timeFontSize from UI: ${initialTimeFontSize} (type: ${typeof initialTimeFontSize})`);
+    // Create initial style object if it doesn't exist
+    key.style = key.style || {};
+    key.style.showIcon = false;
+    key.style.showTitle = false;
+    key.style.showEmoji = false;
+    key.style.showImage = true;
 
+    // Extract initial progressBarColor from the incoming key data
+    const initialProgressBarColor = key.data?.progressBarColor || '#1DB954';
+    
     // Initialize data and store in keyManager
     key.data = {
         updateInterval: key.data?.updateInterval || 4000, // API update interval (e.g., 4s)
@@ -792,30 +823,35 @@ async function initializeNowPlayingKey(serialNumber, key) {
         titleFontSize: key.data?.titleFontSize || 18,
         artistFontSize: key.data?.artistFontSize || 14,
         // Convert the timeFontSize to a number if it's a string
-        timeFontSize: initialTimeFontSize !== undefined ? (typeof initialTimeFontSize === 'string' ? parseInt(initialTimeFontSize, 10) : initialTimeFontSize) : 10, 
+        timeFontSize: key.data?.timeFontSize !== undefined ? (typeof key.data.timeFontSize === 'string' ? parseInt(key.data.timeFontSize, 10) : key.data.timeFontSize) : 10, 
+        // Use the extracted progressBarColor
+        progressBarColor: initialProgressBarColor,
         // Interpolation state
         currentTrackDetails: null, // Store details like name, artist, duration, image
         lastApiUpdateTime: 0,
         progressAtLastUpdate: 0,
         durationMs: 0,
         interpolationIntervalId: null, // Store the UI update interval ID
-        // apiFetchIntervalId: null // API fetch interval ID is stored in keyManager.keyIntervals
     };
     
-    // Log the set timeFontSize
-    logger.info(`[initializeNowPlayingKey] Set timeFontSize: ${key.data.timeFontSize}`);
+    // Make sure progressBarColor is copied directly to the style object
+    if (!key.style.progressBarColor && key.data.progressBarColor) {
+        key.style.progressBarColor = key.data.progressBarColor;
+    }
     
     keyManager.keyData[keyUid] = key;
 
-    key.style = key.style || {};
-    key.style.showIcon = false;
-    key.style.showTitle = false;
-    key.style.showEmoji = false;
-    key.style.showImage = true;
-
     try {
+        // Create an explicit render style object
+        const renderStyle = {
+            ...key.style,
+            // Force the progressBarColor to be the one from key.data, not from style
+            progressBarColor: key.data.progressBarColor
+        };
+        
         const loadingImage = await renderer.createSpotifyButtonDataUrl(
-            key.width || 360, 'Loading...', 'Connecting...', false, null, 0, 0, key.style,
+            key.width || 360, 'Loading...', 'Connecting...', false, null, 0, 0, 
+            renderStyle, // Use the explicit style with progressBarColor
             key.data.showProgress, key.data.showTitle, key.data.showPlayPause,
             key.data.titleFontSize, key.data.artistFontSize,
             key.data.showTimeInfo,
@@ -830,7 +866,6 @@ async function initializeNowPlayingKey(serialNumber, key) {
 
     // Fetch initial state AND start updates
     await updateNowPlayingKey(serialNumber, key, true); // Pass flag to indicate it should start timers
-    // startNowPlayingUpdates(serialNumber, key); // No longer call separately, handled by updateNowPlayingKey
 }
 
 /** Start Periodic Updates (API Fetch and Interpolation) for Now Playing Key */
@@ -911,12 +946,30 @@ async function updateNowPlayingKey(serialNumber, key, shouldStartTimers = false)
     const keyId = `${serialNumber}-${keyUid}`;
     logger.debug(`Updating now playing key state: ${keyId}`);
 
-    // Retrieve the latest key data from the manager BEFORE the API call
+    // IMPORTANT: Check if the incoming key has a progressBarColor and log it
+    if (key.data?.progressBarColor) {
+        logger.info(`[updateNowPlayingKey] Incoming key has progressBarColor: ${key.data.progressBarColor}`);
+    }
+
+    // Retrieve the latest key data from the manager
     let currentKeyData = keyManager.keyData[keyUid];
     if (!currentKeyData) {
         logger.error(`Key data for ${keyUid} not found during update start.`);
         keyManager.cleanupKey(serialNumber, keyUid);
         return;
+    }
+
+    // CRITICAL: Always update progressBarColor from incoming key data
+    // This ensures that changes made in the UI are immediately reflected
+    if (key.data?.progressBarColor && currentKeyData.data) {
+        const oldColor = currentKeyData.data.progressBarColor;
+        currentKeyData.data.progressBarColor = key.data.progressBarColor;
+        
+        // Always ensure style also has the correct progressBarColor
+        if (!currentKeyData.style) currentKeyData.style = {};
+        currentKeyData.style.progressBarColor = key.data.progressBarColor;
+        
+        logger.info(`[updateNowPlayingKey] Updated progressBarColor: ${oldColor} → ${key.data.progressBarColor}`);
     }
 
     if (!keyManager.activeKeys[keyId]) {
@@ -940,7 +993,6 @@ async function updateNowPlayingKey(serialNumber, key, shouldStartTimers = false)
     } catch (error) {
         logger.error(`Error fetching playback state for ${keyId}: ${error.message}`);
         fetchError = error;
-        // If auth is needed, render a specific state? For now, relies on generic error render.
     }
 
     // --- Process fetched state ---
@@ -963,7 +1015,7 @@ async function updateNowPlayingKey(serialNumber, key, shouldStartTimers = false)
     currentPlaybackState.durationMs = durationMs;
 
     let trackChanged = false;
-    let likedStatusChanged = false; // Renamed from likedStatusChanged for clarity
+    let likedStatusChanged = false;
 
     if (trackId !== previousTrackId) {
         trackChanged = true;
@@ -976,7 +1028,7 @@ async function updateNowPlayingKey(serialNumber, key, shouldStartTimers = false)
                 const savedStatus = await spotifyApi.checkTracksSaved([trackId]);
                 if (savedStatus && savedStatus.length > 0) {
                     currentPlaybackState.isLiked = savedStatus[0];
-                    likedStatusChanged = true; // Mark that we got a definitive status
+                    likedStatusChanged = true;
                     logger.info(`Track ${trackId} liked status: ${currentPlaybackState.isLiked}`);
                 } else {
                     logger.warn(`Could not determine liked status for track ${trackId}`);
@@ -1007,10 +1059,21 @@ async function updateNowPlayingKey(serialNumber, key, shouldStartTimers = false)
     currentKeyData.data.lastApiUpdateTime = now;
     currentKeyData.data.progressAtLastUpdate = progressMs;
     currentKeyData.data.durationMs = durationMs;
+    
+    // ENSURE progressBarColor is always preserved through the update cycle
+    // This makes absolutely sure it doesn't get lost even after playback state updates
+    if (key.data?.progressBarColor) {
+        logger.debug(`[updateNowPlayingKey] Re-ensuring progressBarColor: ${key.data.progressBarColor}`);
+        currentKeyData.data.progressBarColor = key.data.progressBarColor;
+        if (!currentKeyData.style) currentKeyData.style = {};
+        currentKeyData.style.progressBarColor = key.data.progressBarColor;
+    }
     // --- End Update Key-Specific Data ---
 
     // --- Start or Restart Timers if requested (e.g., on initialization) ---
     if (shouldStartTimers) {
+        logger.debug(`Starting/restarting timers for key ${keyId}...`);
+        startOrRestartNowPlayingUpdates(serialNumber, currentKeyData);
         logger.debug(`[updateNowPlayingKey] Key ${keyId} - Calling immediate renderInterpolatedNowPlaying...`);
         await renderInterpolatedNowPlaying(serialNumber, currentKeyData);
         logger.debug(`[updateNowPlayingKey] Key ${keyId} - Immediate render call complete.`);

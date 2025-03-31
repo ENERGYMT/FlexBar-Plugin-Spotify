@@ -81,6 +81,36 @@
                   @update:model-value="updateTimeFontSize"
                 ></v-text-field>
               </v-col>
+              
+              <!-- Progress Bar Color Picker -->
+              <v-col cols="12" sm="4">
+                <v-menu activator="parent" :close-on-content-click="false">
+                  <template v-slot:activator="{ props: menuProps }">
+                    <v-text-field
+                      v-bind="menuProps"
+                      v-model="modelValue.data.progressBarColor"
+                      label="Progress Bar Color"
+                      hint="Color of the progress bar"
+                      persistent-hint
+                      density="compact"
+                      variant="outlined"
+                      @update:model-value="updateProgressBarColor"
+                    >
+                      <template v-slot:prepend-inner>
+                        <div :style="{ backgroundColor: modelValue.data.progressBarColor, width: '20px', height: '20px', marginRight: '8px', borderRadius: '4px', border: '1px solid #ccc' }"></div>
+                      </template>
+                    </v-text-field>
+                  </template>
+                  <v-color-picker 
+                    v-model="modelValue.data.progressBarColor" 
+                    hide-inputs 
+                    elevation="10"
+                    modes="['hex']"
+                    mode="hex"
+                    @update:model-value="updateProgressBarColor"
+                  ></v-color-picker>
+                </v-menu>
+              </v-col>
             </v-row>
           </v-card-text>
 
@@ -139,7 +169,8 @@ const DEFAULT_MODEL_VALUE = {
     showPlayPause: true,
     titleFontSize: 18, // Default title font size
     artistFontSize: 14, // Default artist font size
-    timeFontSize: 14 // Default time font size
+    timeFontSize: 14, // Default time font size
+    progressBarColor: '#1DB954' // Default progress bar color (Spotify green)
   },
   title: 'No track playing'
 };
@@ -166,6 +197,12 @@ export default {
       this.modelValue.data = { ...DEFAULT_MODEL_VALUE.data, ...this.modelValue.data };
       this.modelValue.style = { ...DEFAULT_MODEL_VALUE.style, ...this.modelValue.style };
       this.modelValue.title = this.modelValue.title || DEFAULT_MODEL_VALUE.title;
+      
+      // Ensure progressBarColor is properly synced between data and style
+      if (!this.modelValue.data.progressBarColor) {
+        this.modelValue.data.progressBarColor = '#1DB954';
+      }
+      this.modelValue.style.progressBarColor = this.modelValue.data.progressBarColor;
       
       this.isInitialized = true;
     },
@@ -212,6 +249,14 @@ export default {
       } else if (parsedVal > maxSize) {
         this.modelValue.data.timeFontSize = maxSize;
       }
+    },
+    updateProgressBarColor(value) {
+      const isValidHex = /^#([0-9A-F]{3}){1,2}$/i.test(value);
+      if (!isValidHex) {
+        this.modelValue.data.progressBarColor = '#1DB954';
+      }
+      if (!this.modelValue.style) this.modelValue.style = {};
+      this.modelValue.style.progressBarColor = this.modelValue.data.progressBarColor;
     },
   },
   created() {

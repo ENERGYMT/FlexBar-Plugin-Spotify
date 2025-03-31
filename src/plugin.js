@@ -331,6 +331,9 @@ async function initializeNowPlayingKey(serialNumber, key) {
 
     // Ensure data object exists
     key.data = key.data || {};
+    
+    // Extract progressBarColor from the incoming key
+    const progressBarColor = key.data.progressBarColor || '#1DB954';
 
     // Initialize data and store in keyManager, applying defaults from UI if not present
     key.data = {
@@ -345,6 +348,8 @@ async function initializeNowPlayingKey(serialNumber, key) {
         titleFontSize: key.data.titleFontSize || 18,
         artistFontSize: key.data.artistFontSize || 14,
         timeFontSize: key.data.timeFontSize || 10, // Preserve timeFontSize from UI
+        // Preserve progressBarColor from incoming key data
+        progressBarColor: progressBarColor,
         // Interpolation state (reset on init)
         currentTrackDetails: null,
         lastApiUpdateTime: 0,
@@ -353,21 +358,28 @@ async function initializeNowPlayingKey(serialNumber, key) {
         interpolationIntervalId: null, // Initialize as null
     };
     
-    // Log the resulting timeFontSize value after setting defaults
-    logger.info(`[initializeNowPlayingKey] After initialization, timeFontSize is: ${key.data.timeFontSize} (type: ${typeof key.data.timeFontSize})`);
-    
     keyManager.keyData[keyUid] = key; // Store the fully initialized key data
 
-    // ... rest of style setup and initial loading image draw ...
+    // Style setup and initial loading image draw
     key.style = key.style || {};
     key.style.showIcon = false;
     key.style.showTitle = false;
     key.style.showEmoji = false;
     key.style.showImage = true;
+    
+    // Make sure progressBarColor is explicitly set in the style object
+    key.style.progressBarColor = key.data.progressBarColor;
 
     try {
+        // Create a new style object with explicitly forced progressBarColor
+        const renderStyle = {
+            ...key.style,
+            progressBarColor: key.data.progressBarColor // Force progressBarColor
+        };
+        
         const loadingImage = await renderer.createSpotifyButtonDataUrl(
-            key.width || 360, 'Loading...', 'Connecting...', false, null, 0, 0, key.style,
+            key.width || 360, 'Loading...', 'Connecting...', false, null, 0, 0, 
+            renderStyle, // Use the explicit render style with progressBarColor
             key.data.showProgress, key.data.showTitle, key.data.showPlayPause,
             key.data.titleFontSize, key.data.artistFontSize, 
             key.data.showTimeInfo, key.data.timeFontSize // Pass the preserved timeFontSize
@@ -379,11 +391,7 @@ async function initializeNowPlayingKey(serialNumber, key) {
     }
 
     // Fetch initial state AND start updates
-    // ADD Log: Indicate start of initial fetch
-    logger.info(`[initializeNowPlayingKey] Key ${keyId} - Triggering initial fetch and timer start...`);
     await updateNowPlayingKey(serialNumber, key, true); // Pass flag to indicate it should start timers
-    // ADD Log: Indicate end of initial fetch call
-    logger.info(`[initializeNowPlayingKey] Key ${keyId} - Initial fetch/start call complete.`);
 }
 
 /** Start Periodic Updates (API Fetch and Interpolation) for Now Playing Key */
@@ -481,6 +489,15 @@ async function updateNowPlayingKey(serialNumber, key, shouldStartTimers = false)
         return;
     }
 
+    // Update progressBarColor from incoming key data to ensure UI changes are reflected
+    if (key.data?.progressBarColor && currentKeyData.data) {
+        currentKeyData.data.progressBarColor = key.data.progressBarColor;
+        
+        // Also ensure style has the same progressBarColor
+        if (!currentKeyData.style) currentKeyData.style = {};
+        currentKeyData.style.progressBarColor = key.data.progressBarColor;
+    }
+
     if (!keyManager.activeKeys[keyId]) {
         logger.warn(`Attempted to update inactive key ${keyId}, cleaning up.`);
         keyManager.cleanupKey(serialNumber, keyUid);
@@ -491,27 +508,15 @@ async function updateNowPlayingKey(serialNumber, key, shouldStartTimers = false)
     let fetchError = null;
     let needsAuth = false;
     try {
-        // ADD Log: Before auth check/API call
-        logger.debug(`[updateNowPlayingKey] Key ${keyId} - Checking auth and preparing to fetch playback state...`);
         if (!spotifyAuth.getAuthenticationStatus()) {
-            logger.info(`[updateNowPlayingKey] Key ${keyId} - Attempting auth initialization...`);
             const initSuccess = await spotifyAuth.initializeAuthentication();
             if (!initSuccess) {
                 needsAuth = true;
-                logger.error(`[updateNowPlayingKey] Key ${keyId} - Auth initialization failed.`);
                 throw new Error('Authentication required and initialization failed.');
             }
-             logger.info(`[updateNowPlayingKey] Key ${keyId} - Auth initialization successful.`);
         }
-        // ADD Log: Before API call
-        logger.debug(`[updateNowPlayingKey] Key ${keyId} - Calling spotifyApi.getCurrentPlayback()...`);
         playbackState = await spotifyApi.getCurrentPlayback();
-        // ADD Log: After successful API call
-        logger.debug(`[updateNowPlayingKey] Key ${keyId} - spotifyApi.getCurrentPlayback() successful. State:`, playbackState);
-
     } catch (error) {
-        // ADD Log: On API error
-        logger.error(`[updateNowPlayingKey] Key ${keyId} - Error fetching playback state: ${error.message}`);
         fetchError = error;
     }
 
@@ -544,12 +549,8 @@ async function updateNowPlayingKey(serialNumber, key, shouldStartTimers = false)
             try {
                 const savedStatus = await spotifyApi.checkTracksSaved([trackId]);
                 if (savedStatus && savedStatus.length > 0) {
-                    // Log the received status
-                    logger.info(`[updateNowPlayingKey] Liked status from API for ${trackId}: ${savedStatus[0]}`);
                     currentPlaybackState.isLiked = savedStatus[0];
                     likedStatusChanged = true;
-                    // Log the state after setting it
-                    logger.info(`[updateNowPlayingKey] Set currentPlaybackState.isLiked to: ${currentPlaybackState.isLiked}`);
                 } else {
                     logger.warn(`Could not determine liked status for track ${trackId}`);
                     currentPlaybackState.isLiked = null; // Ensure it's null if API fails
@@ -574,31 +575,30 @@ async function updateNowPlayingKey(serialNumber, key, shouldStartTimers = false)
         return;
     }
 
-    // --- Update Key-Specific Data for Interpolation --- //
-    logger.debug(`[updateNowPlayingKey] Key ${keyId} - Updating key data with fetched state...`);
+    // Update Key-Specific Data for Interpolation
     currentKeyData.data.currentTrackDetails = currentTrack;
     currentKeyData.data.lastApiUpdateTime = now;
     currentKeyData.data.progressAtLastUpdate = progressMs;
     currentKeyData.data.durationMs = durationMs;
-    // --- End Update Key-Specific Data --- //
-
-    // --- Start or Restart Timers if requested (e.g., on initialization) --- //
-    if (shouldStartTimers) {
-        // ADD Log: Before calling start/restart timers
-        logger.debug(`[updateNowPlayingKey] Key ${keyId} - Calling startOrRestartNowPlayingUpdates...`);
-        startOrRestartNowPlayingUpdates(serialNumber, currentKeyData);
+    
+    // ENSURE progressBarColor doesn't get lost after backend API update
+    // Re-ensure progressBarColor is still set correctly after the update
+    if (key.data?.progressBarColor) {
+        currentKeyData.data.progressBarColor = key.data.progressBarColor;
+        
+        // Re-ensure style also has the correct progressBarColor
+        if (!currentKeyData.style) currentKeyData.style = {};
+        currentKeyData.style.progressBarColor = key.data.progressBarColor;
     }
 
-    // --- Trigger Interpolated Render (Always) --- //
-    // ADD Log: Before calling immediate render
-    logger.debug(`[updateNowPlayingKey] Key ${keyId} - Calling immediate renderInterpolatedNowPlaying...`);
-    await renderInterpolatedNowPlaying(serialNumber, currentKeyData);
-    // ADD Log: After calling immediate render
-    logger.debug(`[updateNowPlayingKey] Key ${keyId} - Immediate render call complete.`);
+    // Start or restart timers if needed
+    if (shouldStartTimers) {
+        startOrRestartNowPlayingUpdates(serialNumber, currentKeyData);
+        await renderInterpolatedNowPlaying(serialNumber, currentKeyData);
+    }
 
-    // --- Trigger Update for Like Keys if needed --- //
+    // Trigger Update for Like Keys if needed
     if (trackChanged || likedStatusChanged) {
-       // ... (like key update logic - no changes) ...
         logger.debug(`Track or liked status change detected. Updating relevant like keys.`);
         Object.keys(keyManager.activeKeys).forEach(activeKeyId => {
             const [sn, likeKeyUid] = activeKeyId.split('-');
@@ -612,7 +612,6 @@ async function updateNowPlayingKey(serialNumber, key, shouldStartTimers = false)
             }
         });
     }
-    // --- End Trigger Update for Like Keys --- //
 
     logger.debug(`[updateNowPlayingKey] Key ${keyId} - Update cycle finished.`);
 }
