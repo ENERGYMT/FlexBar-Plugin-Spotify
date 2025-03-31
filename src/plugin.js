@@ -537,22 +537,27 @@ async function updateNowPlayingKey(serialNumber, key, shouldStartTimers = false)
     if (trackId !== previousTrackId) {
         trackChanged = true;
         logger.info(`Track changed: ${trackId} (was ${previousTrackId})`);
-        currentPlaybackState.isLiked = null;
+        currentPlaybackState.isLiked = null; // Reset while checking
 
         if (isActive && trackId && trackId !== currentPlaybackState.lastCheckedTrackId) {
             logger.debug(`Checking liked status for new track: ${trackId}`);
             try {
                 const savedStatus = await spotifyApi.checkTracksSaved([trackId]);
                 if (savedStatus && savedStatus.length > 0) {
+                    // Log the received status
+                    logger.info(`[updateNowPlayingKey] Liked status from API for ${trackId}: ${savedStatus[0]}`);
                     currentPlaybackState.isLiked = savedStatus[0];
                     likedStatusChanged = true;
-                    logger.info(`Track ${trackId} liked status: ${currentPlaybackState.isLiked}`);
+                    // Log the state after setting it
+                    logger.info(`[updateNowPlayingKey] Set currentPlaybackState.isLiked to: ${currentPlaybackState.isLiked}`);
                 } else {
                     logger.warn(`Could not determine liked status for track ${trackId}`);
+                    currentPlaybackState.isLiked = null; // Ensure it's null if API fails
                 }
                 currentPlaybackState.lastCheckedTrackId = trackId;
             } catch (error) {
                 logger.error(`Error checking if track ${trackId} is saved: ${error.message}`);
+                currentPlaybackState.isLiked = null; // Ensure it's null on error
             }
         } else if (!isActive) {
             logger.info("Playback stopped or became inactive.");
@@ -620,25 +625,17 @@ async function initializeLikeKey(serialNumber, key) {
 
     // Initialize data and store in keyManager
     key.data = {
-        currentTrackId: currentPlaybackState.trackId, // Start with current state
+        likedColor: key.data?.likedColor || '#1DB954',
+        unlikedColor: key.data?.unlikedColor || '#FFFFFF',
+        likeBgColor: key.data?.likeBgColor || '#424242',
         isLiked: currentPlaybackState.isLiked,
-        showStatusText: key.data?.showStatusText ?? false, // Example custom option
-        likedColor: key.data?.likedColor || '#1DB954', // Spotify green
-        unlikedColor: key.data?.unlikedColor || '#FFFFFF', // White
+        currentTrackId: currentPlaybackState.trackId
     };
-    keyManager.keyData[keyUid] = key; // Store updated key data
-
-    // Configure style - maybe force icon?
-    key.style = key.style || {};
-    key.style.showIcon = true; // Typically a like button is just an icon
-    key.style.showTitle = false;
-    key.style.showEmoji = false;
-    key.style.showImage = false;
+    keyManager.keyData[keyUid] = key; // Store initialized data
+    keyManager.activeKeys[keyId] = true; // Mark as active
 
     // Initial draw
-    await updateLikeKeyDisplay(serialNumber, key);
-
-    // No interval needed for the like key itself, it updates when track changes
+    updateLikeKeyDisplay(serialNumber, key);
 }
 
 /** Update Like Key Display */
@@ -660,29 +657,37 @@ async function updateLikeKeyDisplay(serialNumber, key) {
         return; // Cannot proceed
     }
 
-    const { isLiked, currentTrackId, showStatusText, likedColor, unlikedColor } = currentKeyData.data;
-    const title = showStatusText ? (currentTrackId ? (isLiked ? 'Liked' : 'Not Liked') : 'No Track') : '';
-    const artist = ''; // Like button usually doesn't show artist/title
-
+    const { isLiked, likedColor, unlikedColor, likeBgColor } = currentKeyData.data;
+    
     try {
-        // Use the renderer, passing specific options for the 'like' button type
         const buttonDataUrl = await renderer.createSpotifyButtonDataUrl(
             currentKeyData.width || 80, // Like button specific default width
-            null, null, null, null, 0, 0, // Non-relevant params for 'like' type
-            currentKeyData.style || {},   // Pass base style
-            false, false, false, 0, 0,    // Non-relevant params for 'like' type
-            { // Options object
+            null, // trackName (always null now)
+            null, // artistName (always null)
+            null, // isPlaying (not used)
+            null, // albumArtUrl (not used)
+            0,    // progress (not used)
+            0,    // duration (not used)
+            currentKeyData.style || {},
+            false, // showProgress
+            false, // showTitle
+            false, // showPlayPause
+            0,     // titleFontSize
+            0,     // artistFontSize
+            false, // showTimeInfo
+            0,     // timeFontSize
+            {
                 buttonType: 'like',
                 isLiked: isLiked,
-                // currentTrackId: currentTrackId, // Pass track ID if renderer needs it
-                likedColor: likedColor,     // Pass custom colors from key data
-                unlikedColor: unlikedColor
+                likedColor: likedColor,
+                unlikedColor: unlikedColor,
+                likeBgColor: likeBgColor
             }
         );
         keyManager.simpleDraw(serialNumber, currentKeyData, buttonDataUrl);
     } catch (error) {
         logger.error(`Error rendering like key ${keyId}: ${error.message}`);
-        const errorText = currentTrackId ? (isLiked === null ? '?' : (isLiked ? '♥' : '♡')) : '-';
+        const errorText = isLiked === null ? '?' : (isLiked ? '♥' : '♡'); // Simplified error text
         keyManager.textOnlyDraw(serialNumber, currentKeyData, errorText); // Fallback text
     }
 }

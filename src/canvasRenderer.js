@@ -163,6 +163,9 @@ function drawPrevIcon(ctx, x, y, size, color = '#FFFFFF') {
  * @param {string} unlikedColor Color for unliked/stroke state
  */
 function drawLikeIcon(ctx, x, y, size, isLiked, likedColor = '#1DB954', unlikedColor = '#FFFFFF') {
+    // Log the received value and its type
+    logger.info(`[drawLikeIcon] Received isLiked: ${isLiked} (type: ${typeof isLiked})`);
+
     // --- Calculate Scaling & Translation --- 
     // Original path bounds (approximate, based on SVG data: X:100-900, Y:192-881)
     // ViewBox 0 0 1000 1000
@@ -218,17 +221,19 @@ function drawLikeIcon(ctx, x, y, size, isLiked, likedColor = '#1DB954', unlikedC
     // --- End Path Drawing ---
 
     // Style and draw - Conditional fill/stroke based on isLiked
-    ctx.lineWidth = 3.5 / scale; // Restore for bolder outline
-    ctx.strokeStyle = unlikedColor; // Restore for outline
-    ctx.fillStyle = likedColor; // Restore for fill
-    // Shadow is still removed
+    ctx.lineWidth = 3.5 / scale; // Use a scaled line width
+    ctx.strokeStyle = unlikedColor; 
+    ctx.fillStyle = likedColor; 
 
-    // Conditional fill/stroke logic restored
+    // Conditional fill/stroke logic
     if (isLiked === true) {
+        logger.info(`[drawLikeIcon] Action: Filling (isLiked is true)`);
         ctx.fill(); // Fill if liked
     } else if (isLiked === false) {
+        logger.info(`[drawLikeIcon] Action: Stroking (isLiked is false)`);
         ctx.stroke(); // Outline if not liked
     } else {
+        logger.info(`[drawLikeIcon] Action: Stroking dimmed (isLiked is null/undefined)`);
         // Unknown state: draw dimmed outline
         ctx.globalAlpha = 0.6;
         ctx.stroke(); // Outline for unknown state
@@ -344,7 +349,7 @@ function renderSimpleCanvas({ width = 360, height = 60, elements = [], backgroun
  * @param {object} config Configuration object
  * @returns {Promise<Canvas>} A promise that resolves with the Canvas object.
  */
-async function createModernNowPlayingCanvas(config) { // Changed to accept a single config object
+async function createModernNowPlayingCanvas(config) {
     // Destructure all properties from the config object
     const {
         width = 360,
@@ -370,31 +375,40 @@ async function createModernNowPlayingCanvas(config) { // Changed to accept a sin
         const canvas = createCanvas(width, height);
         const ctx = canvas.getContext('2d');
         
+        // --- Enable Image Smoothing --- //
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high'; // Use the best quality
+        // --- End Enable Image Smoothing --- //
+
         // --- Extract options for different button types --- 
         const { 
-            buttonType = 'nowPlaying', // Default to existing behavior
-            isLiked = null,           // Relevant for 'like' button
-            likedColor,              // Color for liked state
-            unlikedColor             // Color for unliked state
+            buttonType = 'nowPlaying',
+            isLiked = null,
+            likedColor,          
+            unlikedColor,
+            likeBgColor // Extract likeBgColor from options
         } = options;
 
         // === RENDER LIKE BUTTON ===
         if (buttonType === 'like') {
-            const cornerRadius = 12;
+            // Log the received values
+            logger.info(`[createModernNowPlayingCanvas] Rendering 'like' button with isLiked: ${isLiked}, bgColor: ${likeBgColor}`);
             
-            // Draw background using the path directly - #1c1c1c, no stroke, 1px inset
-            ctx.save();
-            const inset = 1; // Inset by 1 pixel
-            roundedRect(ctx, inset, inset, width - (inset * 2), height - (inset * 2), cornerRadius - inset); // Draw slightly smaller
-            ctx.fillStyle = '#1c1c1c'; // Set fill color to #1c1c1c
-            ctx.fill(); // Fill the path
-            ctx.restore();
-
-            // Draw the like icon in the center (on top of background)
-            const iconSize = Math.min(width, height) * 0.6; 
-            const iconX = width / 2;
-            const iconY = height / 2;
-            drawLikeIcon(ctx, iconX, iconY, iconSize, isLiked, likedColor, unlikedColor);
+            const finalLikedColor = likedColor || '#1DB954';
+            const finalUnlikedColor = unlikedColor || '#FFFFFF';
+            
+            // Use the provided background color or default
+            const finalLikeBgColor = likeBgColor || '#424242'; 
+            ctx.fillStyle = finalLikeBgColor;
+            
+            // Use roundedRect for the background
+            const cornerRadius = 10; // Use a standard corner radius
+            roundedRect(ctx, 0, 0, width, height, cornerRadius);
+            ctx.fill(); // Fill the rounded path
+            
+            // Draw the like icon using the correct function name and parameters
+            const iconSize = Math.min(width, height) * 0.6; // Use appropriate size calculation
+            drawLikeIcon(ctx, width / 2, height / 2, iconSize, isLiked, finalLikedColor, finalUnlikedColor);
             
             return canvas; // Return early for like button
         }
@@ -434,16 +448,21 @@ async function createModernNowPlayingCanvas(config) { // Changed to accept a sin
         gradient.addColorStop(0, gradientColors[0]);
         gradient.addColorStop(1, gradientColors[1]);
         
-        const cornerRadius = 8;
-        ctx.save(); // Save before clipping
+        const cornerRadius = 10;
+        
+        // --- MODIFIED DRAWING LOGIC ---
+        // Create the rounded rectangle path first
         roundedRect(ctx, 0, 0, width, height, cornerRadius); 
-        ctx.clip();
         
+        // Fill the path with the gradient
         ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, width, height);
+        ctx.fill();
+
+        // Fill the same path again with the overlay color
         ctx.fillStyle = 'rgba(0, 0, 0, 0.35)'; 
-        ctx.fillRect(0, 0, width, height);
-        
+        ctx.fill();
+        // --- END MODIFIED DRAWING LOGIC ---
+
         // Layout
         const padding = 4;
         const artSize = height - (padding * 2);
@@ -466,18 +485,27 @@ async function createModernNowPlayingCanvas(config) { // Changed to accept a sin
             ctx.restore(); // Restore from image clip
         }
 
-        // Progress Bar
+        // Define progressBarHeight here so it's always available
+        const progressBarHeight = 4; 
+        let progressBarY = height - padding; // Default Y if no progress bar (align to bottom padding)
+
+        // Progress Bar (Adjusted positioning)
         if (showProgress && duration > 0) {
-            const progressBarHeight = 4;
-            const progressBarY = height - progressBarHeight;
+            // Update progressBarY when it's actually shown
+            progressBarY = height - progressBarHeight - padding; 
             const progressBarRadius = progressBarHeight / 2;
+            
+            // Draw background bar, slightly indented
             ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
-            roundedRect(ctx, 0, progressBarY, width, progressBarHeight, progressBarRadius);
+            roundedRect(ctx, padding, progressBarY, width - (padding * 2), progressBarHeight, progressBarRadius);
             ctx.fill();
+            
+            // Draw progress fill
             ctx.fillStyle = accentColor;
             const progressRatio = Math.min(1, Math.max(0, progress / duration)); 
-            if (width * progressRatio > 0) {
-                 roundedRect(ctx, 0, progressBarY, width * progressRatio, progressBarHeight, progressBarRadius);
+            const progressWidth = (width - (padding * 2)) * progressRatio; // Calculate width based on indented bar
+            if (progressWidth > 0) {
+                 roundedRect(ctx, padding, progressBarY, progressWidth, progressBarHeight, progressBarRadius);
                  ctx.fill();
             }
         }
@@ -566,16 +594,20 @@ async function createModernNowPlayingCanvas(config) { // Changed to accept a sin
             ctx.textAlign = 'right';
             ctx.textBaseline = 'bottom';
             
-            // Position time info in the bottom right, above progress bar
-            // Adjust position based on font size to avoid cutting off text
-            const timeY = height - Math.max(6, finalTimeFontSize / 3); // Dynamic position based on font size
+            // Position time info in the bottom right
+            let timeY;
+            if (showProgress) {
+                // Position slightly above the visible progress bar
+                timeY = progressBarY - (padding / 2); 
+            } else {
+                // Position near the bottom edge when progress bar is hidden
+                timeY = height - padding - 2; // Adjust '2' as needed for vertical alignment
+            }
             const timeX = width - padding; // Position from right edge with padding
             
             ctx.fillText(timeText, timeX, timeY);
-            ctx.restore();
+            ctx.restore(); // Restore from time info shadow save
         }
-        
-        ctx.restore(); // Restore from background clip
         
         return canvas; // Return the canvas object
 
@@ -979,35 +1011,29 @@ async function updateNowPlayingKey(serialNumber, key, shouldStartTimers = false)
 
     // --- Start or Restart Timers if requested (e.g., on initialization) ---
     if (shouldStartTimers) {
-        logger.debug(`Starting/Restarting timers for ${keyId} after initial fetch.`);
-        startOrRestartNowPlayingUpdates(serialNumber, currentKeyData);
+        logger.debug(`[updateNowPlayingKey] Key ${keyId} - Calling immediate renderInterpolatedNowPlaying...`);
+        await renderInterpolatedNowPlaying(serialNumber, currentKeyData);
+        logger.debug(`[updateNowPlayingKey] Key ${keyId} - Immediate render call complete.`);
     }
 
-    // --- Trigger Interpolated Render ---
-    // Always render immediately after fetching new data using the interpolation function
-    logger.debug(`Triggering immediate interpolated render for ${keyId} after API update.`);
-    await renderInterpolatedNowPlaying(serialNumber, currentKeyData);
-    // --- End Trigger Interpolated Render ---
-
-
-    // --- Trigger Update for Like Keys if needed ---
+    // --- Trigger Update for Like Keys if needed --- //
     if (trackChanged || likedStatusChanged) {
         logger.debug(`Track or liked status change detected. Updating relevant like keys.`);
         Object.keys(keyManager.activeKeys).forEach(activeKeyId => {
             const [sn, likeKeyUid] = activeKeyId.split('-');
             const likeKey = keyManager.keyData[likeKeyUid];
-            // Check if it's a like key and if the update is relevant (same track context)
             if (likeKey && likeKey.cid === 'com.energy.spotify_integration.like') {
-                // Update the key data directly before redraw
-                likeKey.data = likeKey.data || {}; // Ensure data object exists
-                likeKey.data.currentTrackId = currentPlaybackState.trackId; // Update with latest trackId
-                likeKey.data.isLiked = currentPlaybackState.isLiked; // Update with latest liked status
+                likeKey.data = likeKey.data || {};
+                likeKey.data.currentTrackId = currentPlaybackState.trackId;
+                likeKey.data.isLiked = currentPlaybackState.isLiked;
                 logger.debug(`Updating like key ${activeKeyId} display - Track: ${likeKey.data.currentTrackId}, Liked: ${likeKey.data.isLiked}`);
-                updateLikeKeyDisplay(sn, likeKey); // Trigger redraw
+                updateLikeKeyDisplay(sn, likeKey);
             }
         });
     }
-    // --- End Trigger Update for Like Keys ---
+    // --- End Trigger Update for Like Keys --- //
+
+    logger.debug(`[updateNowPlayingKey] Key ${keyId} - Update cycle finished.`);
 }
 
 module.exports = {
@@ -1018,5 +1044,9 @@ module.exports = {
     drawPrevIcon,
     drawLikeIcon,
     createModernNowPlayingCanvas,
-    createSpotifyButtonDataUrl
-}; 
+    createSpotifyButtonDataUrl,
+    initializeNowPlayingKey, 
+    startOrRestartNowPlayingUpdates,
+    renderInterpolatedNowPlaying,
+    updateNowPlayingKey
+};
