@@ -1,5 +1,5 @@
 const { createCanvas, loadImage } = require('@napi-rs/canvas');
-const { truncateText, getImageColors, roundedRect, createFallbackImage } = require('./utils'); // Import necessary utils
+const { truncateText, getImageColors, roundedRect, createFallbackImage, decodeHtmlEntities } = require('./utils'); // Import necessary utils
 const spotifyAuth = require('./spotifyAuth');
 const spotifyApi = require('./spotifyApi');
 const renderer = require('./canvasRenderer'); // Require the renderer
@@ -359,8 +359,10 @@ async function createModernNowPlayingCanvas(config) { // Changed to accept a sin
         showProgress = true,
         showTitle = true,
         showPlayPause = true,
+        showTimeInfo = true,
         titleFontSize = 18,
         artistFontSize = 14,
+        timeFontSize = 10, // Add default timeFontSize parameter
         options = {} // Destructure the nested options object as well
     } = config; // Destructure from the single argument
 
@@ -500,7 +502,11 @@ async function createModernNowPlayingCanvas(config) { // Changed to accept a sin
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
 
-        if (showTitle && trackName && availableTextWidth > 10) {
+        // Decode HTML entities in track name and artist name
+        const decodedTrackName = decodeHtmlEntities(trackName);
+        const decodedArtistName = decodeHtmlEntities(artistName);
+
+        if (showTitle && decodedTrackName && availableTextWidth > 10) {
             ctx.save();
             ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
             ctx.shadowBlur = 5;
@@ -508,12 +514,12 @@ async function createModernNowPlayingCanvas(config) { // Changed to accept a sin
             ctx.shadowOffsetY = 1;
             ctx.font = `600 ${finalTitleFontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
             ctx.fillStyle = '#FFFFFF';
-            let displayTrackName = truncateText(ctx, trackName, availableTextWidth); // Uses util
+            let displayTrackName = truncateText(ctx, decodedTrackName, availableTextWidth); // Uses util
             ctx.fillText(displayTrackName, textX, titleY);
             ctx.restore();
         }
         
-        if (artistName && availableTextWidth > 10) {
+        if (decodedArtistName && availableTextWidth > 10) {
             ctx.save();
             ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
             ctx.shadowBlur = 4;
@@ -521,8 +527,51 @@ async function createModernNowPlayingCanvas(config) { // Changed to accept a sin
             ctx.shadowOffsetY = 1;
             ctx.font = `500 ${finalArtistFontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
             ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-            let displayArtistName = truncateText(ctx, artistName, availableTextWidth); // Uses util
+            let displayArtistName = truncateText(ctx, decodedArtistName, availableTextWidth); // Uses util
             ctx.fillText(displayArtistName, textX, artistY);
+            ctx.restore();
+        }
+        
+        // Time Information
+        if (showTimeInfo && duration > 0) {
+            // Helper function to format time
+            function formatTime(milliseconds) {
+                if (!milliseconds || isNaN(milliseconds)) return '0:00';
+                
+                const totalSeconds = Math.floor(milliseconds / 1000);
+                const minutes = Math.floor(totalSeconds / 60);
+                const seconds = totalSeconds % 60;
+                return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            }
+            
+            const currentTime = formatTime(progress);
+            const totalTime = formatTime(duration);
+            const timeText = `${currentTime} / ${totalTime}`;
+            
+            ctx.save();
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+            ctx.shadowBlur = 4;
+            
+            // Ensure timeFontSize is a number (might be a string from UI)
+            let parsedTimeFontSize = timeFontSize;
+            if (typeof timeFontSize === 'string') {
+                parsedTimeFontSize = parseInt(timeFontSize, 10);
+            }
+            
+            // Use the configured timeFontSize with fallback to a minimum size
+            const finalTimeFontSize = Math.max(8, Math.min(24, parsedTimeFontSize || 10));
+            
+            ctx.font = `${finalTimeFontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'bottom';
+            
+            // Position time info in the bottom right, above progress bar
+            // Adjust position based on font size to avoid cutting off text
+            const timeY = height - Math.max(6, finalTimeFontSize / 3); // Dynamic position based on font size
+            const timeX = width - padding; // Position from right edge with padding
+            
+            ctx.fillText(timeText, timeX, timeY);
             ctx.restore();
         }
         
@@ -551,7 +600,7 @@ async function createModernNowPlayingCanvas(config) { // Changed to accept a sin
  * This is the primary function expected by plugin.js for drawing.
  * @returns {Promise<string>} Base64 encoded PNG image data URL
  */
-async function createSpotifyButtonDataUrl(width, trackName, artistName, isPlaying, albumArtUrl, progress, duration, style = {}, showProgress = true, showTitle = true, showPlayPause = true, titleFontSize = 18, artistFontSize = 14, options = {}) { // ADDED options param
+async function createSpotifyButtonDataUrl(width, trackName, artistName, isPlaying, albumArtUrl, progress, duration, style = {}, showProgress = true, showTitle = true, showPlayPause = true, titleFontSize = 18, artistFontSize = 14, showTimeInfo = true, timeFontSize = 10, options = {}) {
     try {
         const { backgroundColor = '#1E1E1E', accentColor = '#1DB954' } = style; // Use style from args
         
@@ -568,8 +617,10 @@ async function createSpotifyButtonDataUrl(width, trackName, artistName, isPlayin
             showProgress,
             showTitle,
             showPlayPause,
+            showTimeInfo, // Pass showTimeInfo parameter
             titleFontSize, 
             artistFontSize,
+            timeFontSize, // Pass timeFontSize parameter
             options // Pass options through
         });
 
@@ -603,7 +654,7 @@ let currentPlaybackState = {
 async function renderInterpolatedNowPlaying(serialNumber, key) {
     const keyUid = key.uid;
     const keyId = `${serialNumber}-${keyUid}`;
-    logger.debug(`Rendering interpolated state for key: ${keyId}`);
+    logger.info(`Rendering interpolated state for key: ${keyId}`);
 
     const currentKeyData = keyManager.keyData[keyUid];
     if (!currentKeyData || !currentKeyData.data) {
@@ -620,9 +671,13 @@ async function renderInterpolatedNowPlaying(serialNumber, key) {
         showProgress,
         showTitle,
         showPlayPause,
+        showTimeInfo,
         titleFontSize,
-        artistFontSize
+        artistFontSize,
+        timeFontSize // Add timeFontSize
     } = currentKeyData.data;
+
+    logger.info(`[renderInterpolatedNowPlaying] Key ${keyId} - Using configured timeFontSize: ${timeFontSize} (type: ${typeof timeFontSize})`);
 
     const isPlaying = currentPlaybackState.isPlaying; // Use global state for playing status
     let estimatedProgress = progressAtLastUpdate;
@@ -650,9 +705,10 @@ async function renderInterpolatedNowPlaying(serialNumber, key) {
 
     try {
         const imageUrl = currentTrackDetails?.album?.images?.[0]?.url;
-        // Use stored details, fallback if none
-        const title = escapeXml(currentTrackDetails?.name || 'Nothing Playing');
-        const artist = escapeXml(currentTrackDetails?.artists?.map(a => a.name).join(', ') || '');
+        
+        // Use stored details, fallback if none, and decode any HTML entities
+        const title = decodeHtmlEntities(currentTrackDetails?.name || 'Nothing Playing');
+        const artist = decodeHtmlEntities(currentTrackDetails?.artists?.map(a => a.name).join(', ') || '');
 
         const buttonDataUrl = await renderer.createSpotifyButtonDataUrl(
             currentKeyData.width || 360,
@@ -668,6 +724,8 @@ async function renderInterpolatedNowPlaying(serialNumber, key) {
             showPlayPause,
             titleFontSize,
             artistFontSize,
+            showTimeInfo,
+            timeFontSize, // Add timeFontSize
             {} // Empty options obj -> defaults to nowPlaying
         );
         keyManager.simpleDraw(serialNumber, currentKeyData, buttonDataUrl);
@@ -686,6 +744,10 @@ async function initializeNowPlayingKey(serialNumber, key) {
     const keyId = `${serialNumber}-${keyUid}`;
     logger.info('Initializing nowplaying key:', keyId);
 
+    // Log the initial timeFontSize from the incoming data (convert to string for logging)
+    const initialTimeFontSize = key.data?.timeFontSize;
+    logger.info(`[initializeNowPlayingKey] Initial timeFontSize from UI: ${initialTimeFontSize} (type: ${typeof initialTimeFontSize})`);
+
     // Initialize data and store in keyManager
     key.data = {
         updateInterval: key.data?.updateInterval || 4000, // API update interval (e.g., 4s)
@@ -694,8 +756,11 @@ async function initializeNowPlayingKey(serialNumber, key) {
         showProgress: key.data?.showProgress !== undefined ? key.data.showProgress : true,
         showTitle: key.data?.showTitle !== undefined ? key.data.showTitle : true,
         showPlayPause: key.data?.showPlayPause !== undefined ? key.data.showPlayPause : true,
+        showTimeInfo: key.data?.showTimeInfo !== undefined ? key.data.showTimeInfo : true,
         titleFontSize: key.data?.titleFontSize || 18,
         artistFontSize: key.data?.artistFontSize || 14,
+        // Convert the timeFontSize to a number if it's a string
+        timeFontSize: initialTimeFontSize !== undefined ? (typeof initialTimeFontSize === 'string' ? parseInt(initialTimeFontSize, 10) : initialTimeFontSize) : 10, 
         // Interpolation state
         currentTrackDetails: null, // Store details like name, artist, duration, image
         lastApiUpdateTime: 0,
@@ -704,6 +769,10 @@ async function initializeNowPlayingKey(serialNumber, key) {
         interpolationIntervalId: null, // Store the UI update interval ID
         // apiFetchIntervalId: null // API fetch interval ID is stored in keyManager.keyIntervals
     };
+    
+    // Log the set timeFontSize
+    logger.info(`[initializeNowPlayingKey] Set timeFontSize: ${key.data.timeFontSize}`);
+    
     keyManager.keyData[keyUid] = key;
 
     key.style = key.style || {};
@@ -716,7 +785,10 @@ async function initializeNowPlayingKey(serialNumber, key) {
         const loadingImage = await renderer.createSpotifyButtonDataUrl(
             key.width || 360, 'Loading...', 'Connecting...', false, null, 0, 0, key.style,
             key.data.showProgress, key.data.showTitle, key.data.showPlayPause,
-            key.data.titleFontSize, key.data.artistFontSize
+            key.data.titleFontSize, key.data.artistFontSize,
+            key.data.showTimeInfo,
+            key.data.timeFontSize,
+            {} // Empty options obj -> defaults to nowPlaying
         );
         keyManager.simpleDraw(serialNumber, key, loadingImage);
     } catch (error) {

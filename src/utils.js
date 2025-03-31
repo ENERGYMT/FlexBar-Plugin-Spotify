@@ -195,6 +195,24 @@ function roundedRect(ctx, x, y, width, height, radius) {
     }
 }
 
+/**
+ * Decodes HTML entities from a string
+ * @param {string} text Text containing HTML entities to decode
+ * @returns {string} Text with HTML entities decoded
+ */
+function decodeHtmlEntities(text) {
+    if (!text) return '';
+    
+    // Simple replacement for common entities
+    return text
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&apos;/g, "'")
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&nbsp;/g, ' ');
+}
 
 module.exports = {
     adjustColor,
@@ -202,5 +220,6 @@ module.exports = {
     createFallbackImage,
     getImageColors,
     escapeXml,
-    roundedRect
+    roundedRect,
+    decodeHtmlEntities
 }; 

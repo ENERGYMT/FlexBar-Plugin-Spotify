@@ -136,6 +136,7 @@ function _handlePluginAlive(payload) {
 
         // Always ensure data is up-to-date and key is marked active
         keyManager.activeKeys[keyId] = true;
+        
         // Merge incoming data with existing? For now, let's just store the latest from payload
         // If merging is needed, fetch existing keyManager.keyData[keyUid] first
         keyManager.keyData[keyUid] = key;
@@ -249,24 +250,27 @@ plugin.on('plugin.data', _handlePluginData);
 async function renderInterpolatedNowPlaying(serialNumber, key) {
     const keyUid = key.uid;
     const keyId = `${serialNumber}-${keyUid}`;
+    logger.debug(`Rendering interpolated state for key: ${keyId}`);
 
     const currentKeyData = keyManager.keyData[keyUid];
     if (!currentKeyData || !currentKeyData.data) {
-        logger.error(`[renderInterpolated] Key ${keyId} - Key data or key.data missing.`);
-        keyManager.cleanupKey(serialNumber, keyUid);
+        logger.error(`Key data or key.data missing for ${keyUid} during interpolated render.`);
+        keyManager.cleanupKey(serialNumber, keyUid); // Clean up if data is missing
         return;
     }
 
     const {
-        currentTrackDetails,
+        currentTrackDetails, // Stores details from the last API call
         lastApiUpdateTime,
         progressAtLastUpdate,
         durationMs,
         showProgress,
         showTitle,
         showPlayPause,
+        showTimeInfo, // Extract showTimeInfo
         titleFontSize,
-        artistFontSize
+        artistFontSize,
+        timeFontSize, // Extract timeFontSize
     } = currentKeyData.data;
 
     const isPlaying = currentPlaybackState.isPlaying;
@@ -294,17 +298,19 @@ async function renderInterpolatedNowPlaying(serialNumber, key) {
             currentKeyData.width || 360,
             title,
             artist,
-            isPlaying,
+            isPlaying, // Use current playing status
             imageUrl,
-            Math.round(estimatedProgress),
-            durationMs,
+            Math.round(estimatedProgress), // Use rounded interpolated progress
+            durationMs, // Use stored duration
             currentKeyData.style || {},
             showProgress,
             showTitle,
             showPlayPause,
             titleFontSize,
             artistFontSize,
-            {} // Empty options obj
+            showTimeInfo, // Pass showTimeInfo 
+            timeFontSize, // Pass timeFontSize
+            {} // Empty options obj -> defaults to nowPlaying
         );
         keyManager.simpleDraw(serialNumber, currentKeyData, buttonDataUrl);
     } catch (error) {
@@ -335,8 +341,10 @@ async function initializeNowPlayingKey(serialNumber, key) {
         showProgress: key.data.showProgress !== undefined ? key.data.showProgress : true,
         showTitle: key.data.showTitle !== undefined ? key.data.showTitle : true,
         showPlayPause: key.data.showPlayPause !== undefined ? key.data.showPlayPause : true,
+        showTimeInfo: key.data.showTimeInfo !== undefined ? key.data.showTimeInfo : true, // Preserve showTimeInfo
         titleFontSize: key.data.titleFontSize || 18,
         artistFontSize: key.data.artistFontSize || 14,
+        timeFontSize: key.data.timeFontSize || 10, // Preserve timeFontSize from UI
         // Interpolation state (reset on init)
         currentTrackDetails: null,
         lastApiUpdateTime: 0,
@@ -344,6 +352,10 @@ async function initializeNowPlayingKey(serialNumber, key) {
         durationMs: 0,
         interpolationIntervalId: null, // Initialize as null
     };
+    
+    // Log the resulting timeFontSize value after setting defaults
+    logger.info(`[initializeNowPlayingKey] After initialization, timeFontSize is: ${key.data.timeFontSize} (type: ${typeof key.data.timeFontSize})`);
+    
     keyManager.keyData[keyUid] = key; // Store the fully initialized key data
 
     // ... rest of style setup and initial loading image draw ...
@@ -357,7 +369,8 @@ async function initializeNowPlayingKey(serialNumber, key) {
         const loadingImage = await renderer.createSpotifyButtonDataUrl(
             key.width || 360, 'Loading...', 'Connecting...', false, null, 0, 0, key.style,
             key.data.showProgress, key.data.showTitle, key.data.showPlayPause,
-            key.data.titleFontSize, key.data.artistFontSize
+            key.data.titleFontSize, key.data.artistFontSize, 
+            key.data.showTimeInfo, key.data.timeFontSize // Pass the preserved timeFontSize
         );
         keyManager.simpleDraw(serialNumber, key, loadingImage);
     } catch (error) {

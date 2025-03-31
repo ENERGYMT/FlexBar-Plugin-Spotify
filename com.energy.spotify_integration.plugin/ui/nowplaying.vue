@@ -66,6 +66,21 @@
                   @update:model-value="updateArtistFontSize"
                 ></v-text-field>
               </v-col>
+              
+              <v-col cols="12" sm="4">
+                <v-text-field
+                  v-model="modelValue.data.timeFontSize"
+                  label="Time Info Font (px)"
+                  type="number"
+                  min="8"
+                  max="24"
+                  hint="8-24px"
+                  persistent-hint
+                  density="compact"
+                  variant="outlined"
+                  @update:model-value="updateTimeFontSize"
+                ></v-text-field>
+              </v-col>
             </v-row>
           </v-card-text>
 
@@ -93,6 +108,11 @@
                 <v-switch v-model="modelValue.data.showProgress" hide-details inset color="primary"></v-switch>
               </template>
             </v-list-item>
+            <v-list-item title="Show Time Information">
+              <template v-slot:append>
+                <v-switch v-model="modelValue.data.showTimeInfo" hide-details inset color="primary"></v-switch>
+              </template>
+            </v-list-item>
             <v-list-item title="Show Play/Pause Button">
               <template v-slot:append>
                 <v-switch v-model="modelValue.data.showPlayPause" hide-details inset color="primary"></v-switch>
@@ -113,11 +133,13 @@ const DEFAULT_MODEL_VALUE = {
     enableInterpolation: true, // Default to enabled
     showArtist: true,
     showProgress: true,
+    showTimeInfo: true, // Default to showing time information
     currentTrack: null,
     showTitle: true,
     showPlayPause: true,
     titleFontSize: 18, // Default title font size
-    artistFontSize: 14 // Default artist font size
+    artistFontSize: 14, // Default artist font size
+    timeFontSize: 14 // Default time font size
   },
   title: 'No track playing'
 };
@@ -179,6 +201,16 @@ export default {
         this.modelValue.data.artistFontSize = minSize;
       } else if (parsedVal > maxSize) {
         this.modelValue.data.artistFontSize = maxSize;
+      }
+    },
+    updateTimeFontSize(value) {
+      const parsedVal = parseInt(value);
+      const minSize = 8;
+      const maxSize = 24;
+      if (isNaN(parsedVal) || parsedVal < minSize) {
+        this.modelValue.data.timeFontSize = minSize;
+      } else if (parsedVal > maxSize) {
+        this.modelValue.data.timeFontSize = maxSize;
       }
     },
   },
