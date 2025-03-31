@@ -1,0 +1,168 @@
+{
+    "name": "Spotify Integration",
+    "uuid": "com.energy.spotify_integration",
+    "version": "1.0.0",
+    "author": "ENERGY",
+    "entry": "backend/plugin.cjs",
+    "description": "Spotify Integration for FlexBar",
+    "repo": "",
+    "sdk": {
+        "version": "1.0.0"
+    },
+    "software": {
+        "minimumVersion": "1.0.0"
+    },
+    "os": [
+        {
+            "platform": "mac",
+            "minimumVersion": "10.15"
+        },
+        {
+            "platform": "windows",
+            "minimumVersion": "10"
+        }
+    ],
+    "device": [
+        {
+            "name": "flexbar",
+            "version": "1.0.0"
+        }
+    ],
+    "configPage": "global_config",
+    "keyLibrary": {
+        "title": "Spotify",
+        "style": {
+            "icon": "mdi mdi-spotify"
+        },
+        "children": [
+            {
+                "title": "$SpotifyPlayer.NowPlaying.Title",
+                "tip": "$SpotifyPlayer.NowPlaying.Tip",
+                "cid": "com.energy.spotify_integration.nowplaying",
+                "config": {
+                    "keyType": "default",
+                    "clickable": true,
+                    "platform": [
+                        "windows",
+                        "mac"
+                    ]
+                },
+                "style": {
+                    "icon": "mdi mdi-music-note",
+                    "width": 240
+                },
+                "data": {
+                    "updateInterval": 5000,
+                    "showArtist": true
+                }
+            },
+            {
+                "title": "$SpotifyPlayer.PlayPause.Title",
+                "tip": "$SpotifyPlayer.PlayPause.Tip",
+                "cid": "com.energy.spotify_integration.playpause",
+                "config": {
+                    "keyType": "default",
+                    "clickable": true,
+                    "platform": [
+                        "windows",
+                        "mac"
+                    ]
+                },
+                "style": {
+                    "icon": "mdi mdi-play-pause",
+                    "width": 240
+                },
+                "data": {}
+            },
+            {
+                "title": "$SpotifyPlayer.Previous.Title",
+                "tip": "$SpotifyPlayer.Previous.Tip",
+                "cid": "com.energy.spotify_integration.previous",
+                "config": {
+                    "keyType": "default",
+                    "clickable": true,
+                    "platform": [
+                        "windows",
+                        "mac"
+                    ]
+                },
+                "style": {
+                    "icon": "mdi mdi-skip-previous",
+                    "width": 240
+                },
+                "data": {}
+            },
+            {
+                "title": "$SpotifyPlayer.Next.Title",
+                "tip": "$SpotifyPlayer.Next.Tip",
+                "cid": "com.energy.spotify_integration.next",
+                "config": {
+                    "keyType": "default",
+                    "clickable": true,
+                    "platform": [
+                        "windows",
+                        "mac"
+                    ]
+                },
+                "style": {
+                    "icon": "mdi mdi-skip-next",
+                    "width": 240
+                },
+                "data": {}
+            },
+            {
+                "title": "$SpotifyPlayer.Like.Title",
+                "tip": "$SpotifyPlayer.Like.Tip",
+                "cid": "com.energy.spotify_integration.like",
+                "config": {
+                    "keyType": "default",
+                    "clickable": true,
+                    "platform": [
+                        "windows",
+                        "mac"
+                    ]
+                },
+                "style": {
+                    "icon": "mdi mdi-heart",
+                    "width": 240
+                },
+                "data": {}
+            }
+        ]
+    },
+    "local": {
+        "en": {
+            "PluginName": "Spotify",
+            "SpotifyPlayer": {
+                "NowPlaying": {
+                    "Title": "Now Playing",
+                    "Tip": "Display currently playing track"
+                },
+                "PlayPause": {
+                    "Title": "Play/Pause",
+                    "Tip": "Toggle playback"
+                },
+                "Previous": {
+                    "Title": "Previous",
+                    "Tip": "Go to previous track"
+                },
+                "Next": {
+                    "Title": "Next",
+                    "Tip": "Go to next track"
+                },
+                "Like": {
+                    "Title": "Like",
+                    "Tip": "Like/Unlike the current track"
+                },
+                "Settings": {
+                    "Title": "Settings",
+                    "ClientID": "Client ID",
+                    "ClientSecret": "Client Secret",
+                    "RedirectURI": "Redirect URI",
+                    "Save": "Save",
+                    "Connect": "Connect to Spotify"
+                }
+            }
+        }
+    }
+}

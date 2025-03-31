@@ -1,0 +1,6 @@
+node_modules
+logs
+.vscode
+.env
+package-lock.json
+com.energy.spotify_integration.plugin/backend

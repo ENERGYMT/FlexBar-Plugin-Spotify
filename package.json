@@ -1,0 +1,30 @@
+{
+  "scripts": {
+    "build": "rollup -c",
+    "dev": "npm-run-all plugin:unlink plugin:link -p plugin:watch plugin:debug",
+    "plugin:watch": "rollup -c -w --watch.onEnd=\"npm run plugin:restart\"",
+    "plugin:unlink": "flexcli plugin unlink --uuid com.energy.spotify_integration --silent",
+    "plugin:link": "flexcli plugin link --path com.energy.spotify_integration.plugin --uuid com.energy.spotify_integration --start false",
+    "plugin:restart": "flexcli plugin restart --uuid=com.energy.spotify_integration",
+    "plugin:debug": "flexcli plugin debug --uuid=com.energy.spotify_integration",
+    "plugin:validate": "flexcli plugin validate --path com.energy.spotify_integration.plugin",
+    "plugin:pack": "flexcli plugin pack --path com.energy.spotify_integration.plugin",
+    "plugin:install": "flexcli plugin install --path ./com.energy.spotify_integration.flexplugin --force"
+  },
+  "type": "commonjs",
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^28.0.0",
+    "@rollup/plugin-json": "^6.1.0",
+    "@rollup/plugin-node-resolve": "^15.2.2",
+    "@rollup/plugin-terser": "^0.4.4",
+    "@rollup/plugin-typescript": "^12.1.0",
+    "glob": "^11.0.1",
+    "npm-run-all": "^4.1.5",
+    "rollup": "^4.0.2"
+  },
+  "dependencies": {
+    "@eniac/flexdesigner": "^1.0.1",
+    "@napi-rs/canvas": "^0.1.68",
+    "open": "^10.1.0"
+  }
+}
