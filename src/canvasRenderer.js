@@ -149,6 +149,92 @@ function drawPrevIcon(ctx, x, y, size, color = '#FFFFFF') {
 }
 
 /**
+ * Draws a custom like icon
+ * @param {CanvasRenderingContext2D} ctx Canvas context
+ * @param {number} x Center X position
+ * @param {number} y Center Y position
+ * @param {number} size Icon size
+ * @param {boolean} isLiked Liked state
+ * @param {string} likedColor Color for liked/fill state
+ * @param {string} unlikedColor Color for unliked/stroke state
+ */
+function drawLikeIcon(ctx, x, y, size, isLiked, likedColor = '#1DB954', unlikedColor = '#FFFFFF') {
+    // --- Calculate Scaling & Translation --- 
+    // Original path bounds (approximate, based on SVG data: X:100-900, Y:192-881)
+    // ViewBox 0 0 1000 1000
+    const pathWidth = 800; // 900 - 100
+    const pathHeight = 689; // 881 - 192
+    const pathOriginX = 100; // Original left-most point relative to viewBox
+    const pathOriginY = 192; // Original top-most point relative to viewBox
+    const viewBoxSize = 1000; // SVG path is defined within a 1000x1000 box
+    
+    // Determine the scale factor to fit the path within the target 'size'
+    // Maintain aspect ratio based on the original path dimensions
+    const scaleX = size / pathWidth;
+    const scaleY = size / pathHeight;
+    const scale = Math.min(scaleX, scaleY); // Use the smaller scale to fit completely
+
+    // Scaled dimensions
+    const scaledWidth = pathWidth * scale;
+    const scaledHeight = pathHeight * scale;
+
+    // Calculate translation needed to center the *scaled* path at (x, y)
+    const translateX = x - scaledWidth / 2;
+    const translateY = y - scaledHeight / 2;
+    // --- End Calculation ---
+
+    ctx.save();
+    
+    // Apply transformations: Translate to center, then scale relative to the original viewBox
+    // We translate to the desired top-left corner (translateX, translateY)
+    // Then we scale the drawing context
+    // Then, when drawing, we subtract the original path's origin offset
+    ctx.translate(translateX, translateY);
+    ctx.scale(scale, scale);
+    
+    // --- Draw Path Manually using SVG Commands --- 
+    // Path: M 300 192 C 353 192 404 213 441 250 C 500 317 500 317 559 250 C 596 213 647 192 700 192 C 753 192 804 213 841 250 C 879 288 900 339 900 392 C 900 443 880 492 845 529 C 845 529 845 530 845 530 C 845 530 550 846 550 846 C 512 881 487 881 450 846 C 450 846 159 533 159 533 C 121 495 100 445 100 392 C 100 339 121 288 159 250 C 196 213 247 192 300 192 C 300 192 300 192 300 192
+    ctx.beginPath();
+    ctx.moveTo(300 - pathOriginX, 192 - pathOriginY); // M 300 192 (Adjusted for origin)
+    ctx.bezierCurveTo(353 - pathOriginX, 192 - pathOriginY, 404 - pathOriginX, 213 - pathOriginY, 441 - pathOriginX, 250 - pathOriginY); // C 353 192 404 213 441 250
+    ctx.bezierCurveTo(500 - pathOriginX, 317 - pathOriginY, 500 - pathOriginX, 317 - pathOriginY, 559 - pathOriginX, 250 - pathOriginY); // C 500 317 500 317 559 250
+    ctx.bezierCurveTo(596 - pathOriginX, 213 - pathOriginY, 647 - pathOriginX, 192 - pathOriginY, 700 - pathOriginX, 192 - pathOriginY); // C 596 213 647 192 700 192
+    ctx.bezierCurveTo(753 - pathOriginX, 192 - pathOriginY, 804 - pathOriginX, 213 - pathOriginY, 841 - pathOriginX, 250 - pathOriginY); // C 753 192 804 213 841 250
+    ctx.bezierCurveTo(879 - pathOriginX, 288 - pathOriginY, 900 - pathOriginX, 339 - pathOriginY, 900 - pathOriginX, 392 - pathOriginY); // C 879 288 900 339 900 392
+    ctx.bezierCurveTo(900 - pathOriginX, 443 - pathOriginY, 880 - pathOriginX, 492 - pathOriginY, 845 - pathOriginX, 529 - pathOriginY); // C 900 443 880 492 845 529
+    // C 845 529 845 530 845 530 (These are points, not curves, seems like a duplicate point)
+    ctx.bezierCurveTo(845 - pathOriginX, 530 - pathOriginY, 550 - pathOriginX, 846 - pathOriginY, 550 - pathOriginX, 846 - pathOriginY); // C 845 530 550 846 550 846
+    ctx.bezierCurveTo(512 - pathOriginX, 881 - pathOriginY, 487 - pathOriginX, 881 - pathOriginY, 450 - pathOriginX, 846 - pathOriginY); // C 512 881 487 881 450 846
+    // C 450 846 159 533 159 533 (Points, not curves)
+    ctx.bezierCurveTo(159 - pathOriginX, 533 - pathOriginY, 121 - pathOriginX, 495 - pathOriginY, 100 - pathOriginX, 392 - pathOriginY); // C 121 495 100 445 100 392 (Approximation, original SVG uses points)
+    ctx.bezierCurveTo(100 - pathOriginX, 339 - pathOriginY, 121 - pathOriginX, 288 - pathOriginY, 159 - pathOriginX, 250 - pathOriginY); // C 100 339 121 288 159 250
+    ctx.bezierCurveTo(196 - pathOriginX, 213 - pathOriginY, 247 - pathOriginX, 192 - pathOriginY, 300 - pathOriginX, 192 - pathOriginY); // C 196 213 247 192 300 192
+    // Last C 300 192 300 192 300 192 likely closes the path or is redundant
+    ctx.closePath();
+    // --- End Path Drawing ---
+
+    // Style and draw - Conditional fill/stroke based on isLiked
+    ctx.lineWidth = 3.5 / scale; // Restore for bolder outline
+    ctx.strokeStyle = unlikedColor; // Restore for outline
+    ctx.fillStyle = likedColor; // Restore for fill
+    // Shadow is still removed
+
+    // Conditional fill/stroke logic restored
+    if (isLiked === true) {
+        ctx.fill(); // Fill if liked
+    } else if (isLiked === false) {
+        ctx.stroke(); // Outline if not liked
+    } else {
+        // Unknown state: draw dimmed outline
+        ctx.globalAlpha = 0.6;
+        ctx.stroke(); // Outline for unknown state
+        ctx.globalAlpha = 1.0;
+    }
+    
+    ctx.restore();
+}
+
+/**
  * Renders simple elements (text, rect, icon) to a canvas.
  * @param {object} options Configuration options
  * @param {number} options.width Canvas width
@@ -251,29 +337,63 @@ function renderSimpleCanvas({ width = 360, height = 60, elements = [], backgroun
 /**
  * Creates a modern-looking now playing display with album art.
  * Returns a Canvas object.
- * @param {object} options Render options.
+ * @param {object} config Configuration object
  * @returns {Promise<Canvas>} A promise that resolves with the Canvas object.
  */
-async function createModernNowPlayingCanvas({ // Changed name to reflect async Canvas return
-    width = 360,
-    height = 60,
-    trackName = 'No track playing',
-    artistName = '',
-    isPlaying = false,
-    accentColor = '#1DB954',
-    albumArtUrl = null,
-    progress = 0,
-    duration = 0,
-    showProgress = true,
-    showTitle = true,
-    showPlayPause = true,
-    titleFontSize = 18, 
-    artistFontSize = 14 
-}) {
+async function createModernNowPlayingCanvas(config) { // Changed to accept a single config object
+    // Destructure all properties from the config object
+    const {
+        width = 360,
+        height = 60,
+        trackName = 'No track playing',
+        artistName = '',
+        isPlaying = false,
+        accentColor = '#1DB954',
+        albumArtUrl = null,
+        progress = 0,
+        duration = 0,
+        showProgress = true,
+        showTitle = true,
+        showPlayPause = true,
+        titleFontSize = 18,
+        artistFontSize = 14,
+        options = {} // Destructure the nested options object as well
+    } = config; // Destructure from the single argument
+
     try {
         const canvas = createCanvas(width, height);
         const ctx = canvas.getContext('2d');
         
+        // --- Extract options for different button types --- 
+        const { 
+            buttonType = 'nowPlaying', // Default to existing behavior
+            isLiked = null,           // Relevant for 'like' button
+            likedColor,              // Color for liked state
+            unlikedColor             // Color for unliked state
+        } = options;
+
+        // === RENDER LIKE BUTTON ===
+        if (buttonType === 'like') {
+            const cornerRadius = 12;
+            
+            // Draw background using the path directly - #1c1c1c, no stroke, 1px inset
+            ctx.save();
+            const inset = 1; // Inset by 1 pixel
+            roundedRect(ctx, inset, inset, width - (inset * 2), height - (inset * 2), cornerRadius - inset); // Draw slightly smaller
+            ctx.fillStyle = '#1c1c1c'; // Set fill color to #1c1c1c
+            ctx.fill(); // Fill the path
+            ctx.restore();
+
+            // Draw the like icon in the center (on top of background)
+            const iconSize = Math.min(width, height) * 0.6; 
+            const iconX = width / 2;
+            const iconY = height / 2;
+            drawLikeIcon(ctx, iconX, iconY, iconSize, isLiked, likedColor, unlikedColor);
+            
+            return canvas; // Return early for like button
+        }
+        
+        // === RENDER NOW PLAYING BUTTON (Existing Logic) ===
         let albumArt = null;
         if (albumArtUrl) {
             try {
@@ -323,17 +443,6 @@ async function createModernNowPlayingCanvas({ // Changed name to reflect async C
             ctx.clip();
             ctx.drawImage(albumArt, artX, artY, artSize, artSize);
             ctx.restore(); // Restore from image clip
-            // Draw border/shadow after restoring
-            ctx.save();
-            roundedRect(ctx, artX, artY, artSize, artSize, artRadius);
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
-            ctx.shadowBlur = 6;
-            ctx.shadowOffsetX = 0;
-            ctx.shadowOffsetY = 1;
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-            ctx.lineWidth = 1;
-            ctx.stroke();
-            ctx.restore();
         }
 
         // Progress Bar
@@ -423,7 +532,7 @@ async function createModernNowPlayingCanvas({ // Changed name to reflect async C
  * This is the primary function expected by plugin.js for drawing.
  * @returns {Promise<string>} Base64 encoded PNG image data URL
  */
-async function createSpotifyButtonDataUrl(width, trackName, artistName, isPlaying, albumArtUrl, progress, duration, style = {}, showProgress = true, showTitle = true, showPlayPause = true, titleFontSize = 18, artistFontSize = 14) {
+async function createSpotifyButtonDataUrl(width, trackName, artistName, isPlaying, albumArtUrl, progress, duration, style = {}, showProgress = true, showTitle = true, showPlayPause = true, titleFontSize = 18, artistFontSize = 14, options = {}) { // ADDED options param
     try {
         const { backgroundColor = '#1E1E1E', accentColor = '#1DB954' } = style; // Use style from args
         
@@ -441,7 +550,8 @@ async function createSpotifyButtonDataUrl(width, trackName, artistName, isPlayin
             showTitle,
             showPlayPause,
             titleFontSize, 
-            artistFontSize 
+            artistFontSize,
+            options // Pass options through
         });
 
         // Convert the resulting canvas to Data URL
@@ -460,6 +570,7 @@ module.exports = {
     drawPauseIcon,
     drawNextIcon,
     drawPrevIcon,
+    drawLikeIcon,
     createModernNowPlayingCanvas,
     createSpotifyButtonDataUrl
 }; 

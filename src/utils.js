@@ -117,19 +117,25 @@ function getImageColors(ctx, image, numColors = 2) {
         const topRightIndex = (sampleSize - 1) * 4;
         const topRight = [imageData[topRightIndex], imageData[topRightIndex + 1], imageData[topRightIndex + 2]];
         
-        // Helper to format RGB array to CSS string
-        const formatColor = (rgb) => `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+        // Helper to format RGB array to Hex string
+        const componentToHex = (c) => {
+            const hex = c.toString(16);
+            return hex.length == 1 ? "0" + hex : hex;
+        };
+        const rgbToHex = (rgb) => `#${componentToHex(rgb[0])}${componentToHex(rgb[1])}${componentToHex(rgb[2])}`;
 
         // Return two distinct colors, falling back to defaults if corners are too similar or invalid
         // Basic check for validity (non-zero alpha assumed by structure)
         if (topLeft.every(c => c >= 0 && c <= 255) && topRight.every(c => c >= 0 && c <= 255)) {
              // Simple difference check - could be improved
              const diff = Math.abs(topLeft[0] - topRight[0]) + Math.abs(topLeft[1] - topRight[1]) + Math.abs(topLeft[2] - topRight[2]);
+             const hexTopLeft = rgbToHex(topLeft);
              if (diff > 30) { // Arbitrary threshold for distinct colors
-                 return [formatColor(topLeft), formatColor(topRight)];
+                 return [hexTopLeft, rgbToHex(topRight)];
              } else {
                 // If colors are too similar, maybe return one color and a slightly adjusted version
-                return [formatColor(topLeft), adjustColor(formatColor(topLeft), 20)]; // Adjust brightness slightly
+                // Now adjustColor should work as it receives hex
+                return [hexTopLeft, adjustColor(hexTopLeft, 20)]; 
              }
         } else {
              //logger.warn("Could not read valid corner pixel data.");

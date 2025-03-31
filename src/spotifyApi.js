@@ -178,6 +178,72 @@ const spotifyApi = {
     },
 
     /**
+     * Checks if one or more tracks are saved in the current user's 'Your Music' library.
+     * @param {string[]} trackIds An array of Spotify track IDs.
+     * @returns {Promise<boolean[]>} A Promise that resolves to an array of booleans.
+     * @throws {Error} If the request fails.
+     */
+    async checkTracksSaved(trackIds) {
+        if (!trackIds || trackIds.length === 0) {
+            return [];
+        }
+        // Spotify API has a limit of 50 IDs per request for this endpoint
+        if (trackIds.length > 50) {
+            logger.warn('checkTracksSaved called with more than 50 IDs. Only checking the first 50.');
+            trackIds = trackIds.slice(0, 50);
+        }
+        const params = new URLSearchParams({
+            ids: trackIds.join(',')
+        });
+        const endpoint = `me/tracks/contains?${params.toString()}`;
+        return this.makeRequest(endpoint, 'GET');
+    },
+
+    /**
+     * Saves one or more tracks to the current user's 'Your Music' library.
+     * @param {string[]} trackIds An array of Spotify track IDs.
+     * @returns {Promise<null>} A Promise that resolves when the operation is complete.
+     * @throws {Error} If the request fails.
+     */
+    async saveTracks(trackIds) {
+        if (!trackIds || trackIds.length === 0) {
+            return null;
+        }
+        // Spotify API has a limit of 50 IDs per request
+        if (trackIds.length > 50) {
+             logger.warn('saveTracks called with more than 50 IDs. Only saving the first 50.');
+            trackIds = trackIds.slice(0, 50);
+        }
+        const endpoint = 'me/tracks';
+        const body = { ids: trackIds };
+        // This endpoint returns 200 OK on success with no body content
+        await this.makeRequest(endpoint, 'PUT', body);
+        return null; // Indicate success
+    },
+
+    /**
+     * Removes one or more tracks from the current user's 'Your Music' library.
+     * @param {string[]} trackIds An array of Spotify track IDs.
+     * @returns {Promise<null>} A Promise that resolves when the operation is complete.
+     * @throws {Error} If the request fails.
+     */
+    async removeTracks(trackIds) {
+        if (!trackIds || trackIds.length === 0) {
+            return null;
+        }
+         // Spotify API has a limit of 50 IDs per request
+        if (trackIds.length > 50) {
+             logger.warn('removeTracks called with more than 50 IDs. Only removing the first 50.');
+            trackIds = trackIds.slice(0, 50);
+        }
+        const endpoint = 'me/tracks';
+        const body = { ids: trackIds };
+         // This endpoint returns 200 OK on success with no body content
+        await this.makeRequest(endpoint, 'DELETE', body);
+        return null; // Indicate success
+    },
+
+    /**
      * Exchanges an authorization code for access and refresh tokens.
      * Requires clientId, clientSecret, and redirectUri from config.
      * @param {string} code The authorization code from the callback.

@@ -17,6 +17,16 @@ const spotifyApi = require('./spotifyApi');
 const renderer = require('./canvasRenderer'); // Require the renderer
 const keyManager = require('./keyManager'); // ADD require
 
+// --- Global State for Playback ---
+let currentPlaybackState = {
+    trackId: null,
+    isLiked: null,
+    lastCheckedTrackId: null, // Track the ID we last checked the liked status for
+    isActive: false, // Is Spotify actively playing something?
+    isPlaying: false // Is it currently playing vs paused?
+};
+// --- End Global State ---
+
 // --- Remove Key Management State --- //
 // const keyData = {}; 
 // var feedbackKeys = []; // Still keep locally?
@@ -46,16 +56,20 @@ async function controlSpotify(action, value = null) { /* Original - No change */
 
 // Implement triggerNowPlayingUpdate using keyManager
 function triggerNowPlayingUpdate() {
-    logger.info("Triggering manual update for all active 'now playing' keys.");
+    logger.info("Triggering manual update for all active 'now playing' and 'like' keys.");
     Object.keys(keyManager.activeKeys).forEach(keyId => {
         const [serialNumber, keyUid] = keyId.split('-');
-        // Retrieve the full key object using the Uid from keyManager's store
-        const key = keyManager.keyData[keyUid]; 
-        // Check if the key exists and is a now playing key
-        if (key && key.cid === 'com.energy.spotify_integration.nowplaying') {
-             logger.debug(`Manually updating now playing key ${keyId}`);
-            // Make sure to pass the serial number associated with this active key instance
-            updateNowPlayingKey(serialNumber, key);
+        const key = keyManager.keyData[keyUid];
+        if (!key) return; // Skip if key data somehow missing
+
+        // Trigger update for both now playing and like keys
+        if (key.cid === 'com.energy.spotify_integration.nowplaying') {
+            logger.debug(`Manually updating now playing key ${keyId}`);
+            updateNowPlayingKey(serialNumber, key); // Will fetch new state and update relevant keys
+        } else if (key.cid === 'com.energy.spotify_integration.like') {
+            // Just ensure it redraws with current state
+            logger.debug(`Manually updating like key display ${keyId}`);
+            updateLikeKeyDisplay(serialNumber, key);
         }
     });
 }
@@ -109,6 +123,8 @@ function _handlePluginAlive(payload) {
             initializeNowPlayingKey(serialNumber, key); 
         } else if (key.cid === 'com.energy.spotify_integration.counter') {
              initializeCounterKey(serialNumber, key); 
+        } else if (key.cid === 'com.energy.spotify_integration.like') {
+            initializeLikeKey(serialNumber, key);
         }
     }
 }
@@ -148,6 +164,9 @@ function _handlePluginData(payload) {
     } else if (key.cid === "com.energy.spotify_integration.cyclebutton") {
         logger.info(`Cycle button interaction: state=${data.state} (handler)`);
         return { status: "success", message: `Cycle button state: ${data.state}` };
+    } else if (key.cid === "com.energy.spotify_integration.like") {
+        handleLikeInteraction(serialNumber, key, data);
+        return { status: "success", message: "Handled like interaction." };
     }
     
      logger.warn(`Unhandled key interaction via handler for CID: ${key.cid}`);
@@ -264,79 +283,262 @@ function startNowPlayingUpdates(serialNumber, key) {
      keyManager.keyIntervals[keyId] = intervalId; 
 }
 
-/** Update Logic for a Single Now Playing Key */
+/** Update Now Playing Key Display and Fetch State */
 async function updateNowPlayingKey(serialNumber, key) {
-     const keyUid = key.uid;
-     const keyId = `${serialNumber}-${keyUid}`;
-     // logger.debug(`Attempting update for now playing key ${keyId}`);
+    const keyUid = key.uid;
+    const keyId = `${serialNumber}-${keyUid}`;
+    logger.debug(`Updating now playing key: ${keyId}`);
 
+    if (!keyManager.activeKeys[keyId]) {
+        logger.warn(`Attempted to update inactive key ${keyId}, cleaning up interval.`);
+        keyManager.cleanupKey(serialNumber, keyUid); // Use keyManager cleanup
+        return;
+    }
+
+    let playbackState = null;
+    let fetchError = null;
     try {
-        // Use keyManager function
-        if (!keyManager.throttledUpdateCheck()) return; 
+        if (!spotifyAuth.getAuthenticationStatus()) {
+             const initSuccess = await spotifyAuth.initializeAuthentication();
+             if (!initSuccess) throw new Error('Authentication required and initialization failed.');
+        }
+        playbackState = await spotifyApi.getCurrentPlayback();
+    } catch (error) {
+        logger.error(`Error fetching playback state for ${keyId}: ${error.message}`);
+        fetchError = error;
+    }
 
-        if (!spotifyAuth.getAuthenticationStatus()) { 
-            const initSuccess = await spotifyAuth.initializeAuthentication();
-            if (!initSuccess) {
-                logger.warn(`Update skipped for ${keyId}: Auth required.`);
-                const errorImage = await renderer.createSpotifyButtonDataUrl(/* Auth Error Params */);
-                keyManager.simpleDraw(serialNumber, key, errorImage); // Use keyManager
-                if (keyManager.keyIntervals[keyId]) { // Use keyManager
-                     clearInterval(keyManager.keyIntervals[keyId]); // Use keyManager
-                     delete keyManager.keyIntervals[keyId]; // Use keyManager
+    const isActive = !!(playbackState && playbackState.item);
+    const isPlaying = isActive && playbackState.is_playing;
+    const currentTrack = isActive ? playbackState.item : null;
+    const trackId = currentTrack?.id;
+
+    // --- Update Global Playback State --- 
+    currentPlaybackState.isActive = isActive;
+    currentPlaybackState.isPlaying = isPlaying;
+    let trackChanged = false;
+    let likedStatusChanged = false;
+
+    if (isActive && trackId && trackId !== currentPlaybackState.trackId) {
+        trackChanged = true;
+        logger.info(`New track detected: ${trackId} (was ${currentPlaybackState.trackId})`);
+        currentPlaybackState.trackId = trackId;
+        currentPlaybackState.isLiked = null; // Reset like status until checked
+
+        // Check liked status only if the track changed AND it hasn't been checked recently
+        if (trackId !== currentPlaybackState.lastCheckedTrackId) {
+             logger.debug(`Checking liked status for new track: ${trackId}`);
+            try {
+                const savedStatus = await spotifyApi.checkTracksSaved([trackId]);
+                if (savedStatus && savedStatus.length > 0) {
+                    currentPlaybackState.isLiked = savedStatus[0];
+                    likedStatusChanged = true; // Status determined
+                    logger.info(`Track ${trackId} liked status: ${currentPlaybackState.isLiked}`);
+                } else {
+                     logger.warn(`Could not determine liked status for track ${trackId}`);
                 }
-                return;
+                currentPlaybackState.lastCheckedTrackId = trackId; // Mark as checked
+            } catch (error) {
+                logger.error(`Error checking if track ${trackId} is saved: ${error.message}`);
+                // Keep isLiked as null, maybe retry later?
             }
         }
-        
-        const playback = await spotifyApi.getCurrentPlayback();
-        let newTrackData = null;
-        if (playback && playback.item) { newTrackData = { /* ... extract ... */ 
-            id: playback.item.id,
-            name: playback.item.name,
-            artist: playback.item.artists.map(artist => artist.name).join(', '),
-            album: playback.item.album.name,
-            isPlaying: playback.is_playing,
-            albumArtUrl: playback.item.album.images[0]?.url,
-            progress: playback.progress_ms,
-            duration: playback.item.duration_ms
-        }; }
+    } else if (!isActive && currentPlaybackState.trackId) {
+        // Playback stopped
+        trackChanged = true; // Treat stopping as a change
+        logger.info("Playback stopped or became inactive.");
+        currentPlaybackState.trackId = null;
+        currentPlaybackState.isLiked = null;
+        currentPlaybackState.lastCheckedTrackId = null;
+    }
+    // --- End Update Global Playback State ---
 
-        // Use keyManager state
-        const oldTrackData = keyManager.keyData[keyUid]?.data?.currentTrack;
-        const needsUpdate = JSON.stringify(oldTrackData) !== JSON.stringify(newTrackData);
+    // Retrieve the latest key data from the manager
+    const currentKeyData = keyManager.keyData[keyUid];
+    if (!currentKeyData) {
+        logger.error(`Key data for ${keyUid} not found during update.`);
+        return;
+    }
 
-        if (needsUpdate) {
-             logger.info(`Track state changed for ${keyId}. Updating display.`);
-             key.data.currentTrack = newTrackData;
-             // Use keyManager state
-             if (keyManager.keyData[keyUid]) {
-                 keyManager.keyData[keyUid].data = key.data;
-             }
+    // Render Now Playing Key
+    try {
+        const imageUrl = currentTrack?.album?.images?.[0]?.url;
+        const title = escapeXml(currentTrack?.name || (fetchError ? 'Error' : 'Nothing Playing'));
+        const artist = escapeXml(currentTrack?.artists?.map(a => a.name).join(', ') || (fetchError ? fetchError.message : ''));
+        const progress = isActive ? playbackState.progress_ms : 0;
+        const duration = currentTrack?.duration_ms || 0;
 
-             let buttonImage = await renderer.createSpotifyButtonDataUrl(
-                 key.width || 360,
-                 newTrackData ? newTrackData.name : 'No track playing',
-                 newTrackData && key.data.showArtist ? newTrackData.artist : null,
-                 newTrackData ? newTrackData.isPlaying : false,
-                 newTrackData ? newTrackData.albumArtUrl : null,
-                 newTrackData ? newTrackData.progress : 0,
-                 newTrackData ? newTrackData.duration : 0,
-                 key.style, key.data.showProgress, key.data.showTitle, key.data.showPlayPause,
-                 key.data.titleFontSize, key.data.artistFontSize
-             );
-             // Use keyManager draw function
-             keyManager.simpleDraw(serialNumber, key, buttonImage);
-         } 
+        const buttonDataUrl = await renderer.createSpotifyButtonDataUrl(
+            currentKeyData.width || 360,
+            title,
+            artist,
+            isPlaying,
+            imageUrl,
+            progress,
+            duration,
+            currentKeyData.style || {},
+            currentKeyData.data.showProgress,
+            currentKeyData.data.showTitle,
+            currentKeyData.data.showPlayPause,
+            currentKeyData.data.titleFontSize,
+            currentKeyData.data.artistFontSize,
+            {} // Empty options obj -> defaults to nowPlaying
+        );
+        keyManager.simpleDraw(serialNumber, currentKeyData, buttonDataUrl);
     } catch (error) {
-        logger.error(`Failed update for ${keyId}:`, error);
-        // Error handling uses:
-        if (!spotifyAuth.getAuthenticationStatus() && keyManager.keyIntervals[keyId]) { // Use keyManager
-             logger.error(`Stopping updates for ${keyId} due to auth error.`);
-             clearInterval(keyManager.keyIntervals[keyId]); // Use keyManager
-             delete keyManager.keyIntervals[keyId]; // Use keyManager
-             const authErrImg = await renderer.createSpotifyButtonDataUrl(/* Auth Error Params */);
-             keyManager.simpleDraw(serialNumber, key, authErrImg); // Use keyManager
-         } 
+        logger.error(`Error rendering now playing key ${keyId}: ${error.message}`);
+        keyManager.textOnlyDraw(serialNumber, currentKeyData, 'Error updating');
+    }
+
+    // --- Trigger Update for Like Keys if needed ---
+    if (trackChanged || likedStatusChanged) {
+        logger.debug(`Track change or liked status change detected. Updating like keys.`);
+        Object.keys(keyManager.activeKeys).forEach(activeKeyId => {
+            const [sn, likeKeyUid] = activeKeyId.split('-');
+            const likeKey = keyManager.keyData[likeKeyUid];
+            if (likeKey && likeKey.cid === 'com.energy.spotify_integration.like') {
+                // Update the key data directly before redraw
+                likeKey.data = likeKey.data || {}; // Ensure data object exists
+                likeKey.data.currentTrackId = currentPlaybackState.trackId;
+                likeKey.data.isLiked = currentPlaybackState.isLiked;
+                logger.debug(`Updating like key ${activeKeyId} with track ${likeKey.data.currentTrackId}, liked: ${likeKey.data.isLiked}`);
+                updateLikeKeyDisplay(sn, likeKey);
+            }
+        });
+    }
+    // --- End Trigger Update for Like Keys ---
+}
+
+/** Initialize Like Key */
+async function initializeLikeKey(serialNumber, key) {
+    const keyUid = key.uid;
+    const keyId = `${serialNumber}-${keyUid}`;
+    logger.info('Initializing like key:', keyId);
+
+    // Initialize data and store in keyManager
+    key.data = {
+        currentTrackId: currentPlaybackState.trackId, // Start with current state
+        isLiked: currentPlaybackState.isLiked,
+        showStatusText: key.data?.showStatusText ?? false, // Example custom option
+        likedColor: key.data?.likedColor || '#1DB954', // Spotify green
+        unlikedColor: key.data?.unlikedColor || '#FFFFFF', // White
+    };
+    keyManager.keyData[keyUid] = key; // Store updated key data
+
+    // Configure style - maybe force icon?
+    key.style = key.style || {};
+    key.style.showIcon = true; // Typically a like button is just an icon
+    key.style.showTitle = false;
+    key.style.showEmoji = false;
+    key.style.showImage = false;
+
+    // Initial draw
+    await updateLikeKeyDisplay(serialNumber, key);
+
+    // No interval needed for the like key itself, it updates when track changes
+}
+
+/** Update Like Key Display */
+async function updateLikeKeyDisplay(serialNumber, key) {
+    const keyUid = key.uid;
+    const keyId = `${serialNumber}-${keyUid}`;
+    logger.debug(`Updating like key display: ${keyId}`);
+
+    if (!keyManager.activeKeys[keyId]) {
+        logger.warn(`Attempted to update inactive like key ${keyId}.`);
+        // No interval to clear, just return
+        return;
+    }
+
+    // Retrieve the latest key data (important as it might have been updated)
+    const currentKeyData = keyManager.keyData[keyUid];
+    if (!currentKeyData || !currentKeyData.data) {
+        logger.error(`Key data or key.data missing for like key ${keyUid} during display update.`);
+        return; // Cannot proceed
+    }
+
+    const { isLiked, currentTrackId, showStatusText, likedColor, unlikedColor } = currentKeyData.data;
+    const title = showStatusText ? (currentTrackId ? (isLiked ? 'Liked' : 'Not Liked') : 'No Track') : '';
+    const artist = ''; // Like button usually doesn't show artist/title
+
+    try {
+        // Use the renderer, passing specific options for the 'like' button type
+        const buttonDataUrl = await renderer.createSpotifyButtonDataUrl(
+            currentKeyData.width || 80, // Like button specific default width
+            null, null, null, null, 0, 0, // Non-relevant params for 'like' type
+            currentKeyData.style || {},   // Pass base style
+            false, false, false, 0, 0,    // Non-relevant params for 'like' type
+            { // Options object
+                buttonType: 'like',
+                isLiked: isLiked,
+                // currentTrackId: currentTrackId, // Pass track ID if renderer needs it
+                likedColor: likedColor,     // Pass custom colors from key data
+                unlikedColor: unlikedColor
+            }
+        );
+        keyManager.simpleDraw(serialNumber, currentKeyData, buttonDataUrl);
+    } catch (error) {
+        logger.error(`Error rendering like key ${keyId}: ${error.message}`);
+        const errorText = currentTrackId ? (isLiked === null ? '?' : (isLiked ? '♥' : '♡')) : '-';
+        keyManager.textOnlyDraw(serialNumber, currentKeyData, errorText); // Fallback text
+    }
+}
+
+/** Handle Interaction for Like Key */
+async function handleLikeInteraction(serialNumber, key, data) {
+    const keyUid = key.uid;
+    const keyId = `${serialNumber}-${keyUid}`;
+    logger.info(`Handling like interaction for key ${keyId}`);
+
+    // Retrieve the latest key data
+    const currentKeyData = keyManager.keyData[keyUid];
+    if (!currentKeyData || !currentKeyData.data) {
+        logger.error(`Key data or key.data missing for like key ${keyUid} during interaction.`);
+        return; // Cannot proceed
+    }
+
+    const { currentTrackId, isLiked } = currentKeyData.data;
+
+    if (!currentTrackId) {
+        logger.warn(`Like button pressed (${keyId}) but no current track ID is known.`);
+        // Optional: Provide visual feedback for error? (e.g., flash red)
+        return; // No track to like/unlike
+    }
+
+    if (isLiked === null) {
+         logger.warn(`Like button pressed (${keyId}) but liked status is unknown.`);
+         // Optional: Trigger a check? Or just wait for next update cycle.
+         return; // Don't perform action if status is uncertain
+    }
+
+    try {
+        if (!spotifyAuth.getAuthenticationStatus()) {
+             const initSuccess = await spotifyAuth.initializeAuthentication();
+             if (!initSuccess) throw new Error('Authentication required.');
+        }
+
+        if (isLiked) {
+            logger.info(`Attempting to remove track ${currentTrackId} from library (key: ${keyId})`);
+            await spotifyApi.removeTracks([currentTrackId]);
+            logger.info(`Successfully removed track ${currentTrackId}`);
+            currentKeyData.data.isLiked = false;
+            currentPlaybackState.isLiked = false; // Update global state too
+        } else {
+            logger.info(`Attempting to add track ${currentTrackId} to library (key: ${keyId})`);
+            await spotifyApi.saveTracks([currentTrackId]);
+            logger.info(`Successfully saved track ${currentTrackId}`);
+            currentKeyData.data.isLiked = true;
+            currentPlaybackState.isLiked = true; // Update global state too
+        }
+
+        // Update display immediately after successful action
+        await updateLikeKeyDisplay(serialNumber, currentKeyData);
+
+    } catch (error) {
+        logger.error(`Failed to ${isLiked ? 'remove' : 'save'} track ${currentTrackId}: ${error.message}`);
+        // Optional: Provide visual feedback for the error on the key
+        // Revert optimistic update if needed (though check might fix it later)
+        // currentKeyData.data.isLiked = isLiked; // Revert if failed?
     }
 }
 
