@@ -57,60 +57,6 @@
                 }
             },
             {
-                "title": "$SpotifyPlayer.PlayPause.Title",
-                "tip": "$SpotifyPlayer.PlayPause.Tip",
-                "cid": "com.energy.spotify_integration.playpause",
-                "config": {
-                    "keyType": "default",
-                    "clickable": true,
-                    "platform": [
-                        "windows",
-                        "mac"
-                    ]
-                },
-                "style": {
-                    "icon": "mdi mdi-play-pause",
-                    "width": 240
-                },
-                "data": {}
-            },
-            {
-                "title": "$SpotifyPlayer.Previous.Title",
-                "tip": "$SpotifyPlayer.Previous.Tip",
-                "cid": "com.energy.spotify_integration.previous",
-                "config": {
-                    "keyType": "default",
-                    "clickable": true,
-                    "platform": [
-                        "windows",
-                        "mac"
-                    ]
-                },
-                "style": {
-                    "icon": "mdi mdi-skip-previous",
-                    "width": 240
-                },
-                "data": {}
-            },
-            {
-                "title": "$SpotifyPlayer.Next.Title",
-                "tip": "$SpotifyPlayer.Next.Tip",
-                "cid": "com.energy.spotify_integration.next",
-                "config": {
-                    "keyType": "default",
-                    "clickable": true,
-                    "platform": [
-                        "windows",
-                        "mac"
-                    ]
-                },
-                "style": {
-                    "icon": "mdi mdi-skip-next",
-                    "width": 240
-                },
-                "data": {}
-            },
-            {
                 "title": "$SpotifyPlayer.Like.Title",
                 "tip": "$SpotifyPlayer.Like.Tip",
                 "cid": "com.energy.spotify_integration.like",

@@ -66,6 +66,11 @@ async function initializeTokensFromConfigInternal() {
             spotifyTokens.accessToken = config.accessToken;
             spotifyTokens.refreshToken = config.refreshToken;
 
+            // Check if we already have authenticated state in config
+            if (config.isAuthenticated) {
+                logger.info('Found isAuthenticated=true in config');
+            }
+
             logger.info('Tokens found in config, validating...');
 
             // Check if token is valid by making a simple API call
@@ -93,6 +98,19 @@ async function initializeTokensFromConfigInternal() {
                 } else if (response.ok) {
                     isAuthenticated = true;
                     logger.info('Tokens validated successfully');
+                    
+                    // Update config with isAuthenticated flag
+                    try {
+                        const updatedConfig = {
+                            ...config,
+                            isAuthenticated: true
+                        };
+                        await plugin.setConfig(updatedConfig);
+                        logger.info('Updated config with isAuthenticated flag');
+                    } catch (configError) {
+                        logger.error('Failed to update config with isAuthenticated flag:', configError);
+                    }
+                    
                     setupTokenRefreshTimer(); // Setup timer with valid tokens
                     return true;
                 } else {
@@ -203,7 +221,8 @@ async function refreshAccessTokenInternal(retryCount = 0) {
             const updatedConfig = {
                 ...config, // Preserve existing config values
                 accessToken: spotifyTokens.accessToken,
-                refreshToken: spotifyTokens.refreshToken
+                refreshToken: spotifyTokens.refreshToken,
+                isAuthenticated: true
             };
             await plugin.setConfig(updatedConfig);
              logger.info("Refreshed tokens saved to config.");
@@ -296,7 +315,8 @@ async function initiateUserAuthentication(spotifyApiInstance) {
                             const updatedConfig = {
                                 ...currentConfig,
                                 accessToken: spotifyTokens.accessToken,
-                                refreshToken: spotifyTokens.refreshToken
+                                refreshToken: spotifyTokens.refreshToken,
+                                isAuthenticated: true
                             };
     
                             // Save to config
@@ -337,7 +357,7 @@ async function initiateUserAuthentication(spotifyApiInstance) {
 
             server.listen(8888, () => {
                 logger.info('Auth callback server listening on port 8888');
-                const scopes = 'user-read-playback-state user-modify-playback-state user-read-currently-playing';
+                const scopes = 'user-read-playback-state user-modify-playback-state user-read-currently-playing user-library-read';
                 // Consider adding state parameter for security:
                 // const state = require('crypto').randomBytes(16).toString('hex'); 
                 // Store state temporarily and verify in callback
