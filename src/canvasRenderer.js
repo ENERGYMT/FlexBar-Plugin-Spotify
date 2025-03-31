@@ -1,6 +1,10 @@
 const { createCanvas, loadImage } = require('@napi-rs/canvas');
-const { logger } = require("@eniac/flexdesigner");
 const { truncateText, getImageColors, roundedRect, createFallbackImage } = require('./utils'); // Import necessary utils
+const spotifyAuth = require('./spotifyAuth');
+const spotifyApi = require('./spotifyApi');
+const renderer = require('./canvasRenderer'); // Require the renderer
+const keyManager = require('./keyManager');
+const logger = require("./loggerWrapper"); // Add this line
 
 /**
  * Draws a custom play icon
@@ -396,11 +400,26 @@ async function createModernNowPlayingCanvas(config) { // Changed to accept a sin
         // === RENDER NOW PLAYING BUTTON (Existing Logic) ===
         let albumArt = null;
         if (albumArtUrl) {
-            try {
-                albumArt = await loadImage(albumArtUrl);
-            } catch (imgError) {
-                logger.error(`Failed to load album art from ${albumArtUrl}:`, imgError);
+            // --- Add Retry Logic for loadImage ---
+            const MAX_RETRIES = 2;
+            const RETRY_DELAY_MS = 500; // 0.5 seconds delay
+            for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+                try {
+                    albumArt = await loadImage(albumArtUrl);
+                    logger.debug(`Album art loaded successfully on attempt ${attempt}`);
+                    break; // Success, exit loop
+                } catch (imgError) {
+                    logger.warn(`Failed to load album art (Attempt ${attempt}/${MAX_RETRIES}) from ${albumArtUrl}: ${imgError.message}`);
+                    if (attempt === MAX_RETRIES) {
+                        logger.error(`Failed to load album art after ${MAX_RETRIES} attempts. Using fallback.`);
+                        // albumArt remains null, fallback will be used
+                    } else {
+                        // Wait before retrying
+                        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+                    }
+                }
             }
+            // --- End Retry Logic ---
         }
 
         let gradientColors = ['#282828', '#1E1E1E'];
@@ -562,6 +581,361 @@ async function createSpotifyButtonDataUrl(width, trackName, artistName, isPlayin
         // Use the utility fallback function which returns a Data URL directly
         return createFallbackImage(width, 60); // Uses util
     }
+}
+
+// --- Global State for Playback ---
+let currentPlaybackState = {
+    trackId: null,
+    isLiked: null,
+    lastCheckedTrackId: null,
+    isActive: false,
+    isPlaying: false,
+    // Add fields to store the *exact* moment state was last fetched for interpolation
+    progressAtLastUpdate: 0,
+    lastApiUpdateTime: 0,
+    durationMs: 0,
+};
+// --- End Global State ---
+
+// --- Interpolated Rendering Function ---
+
+/** Renders the Now Playing key using interpolated progress */
+async function renderInterpolatedNowPlaying(serialNumber, key) {
+    const keyUid = key.uid;
+    const keyId = `${serialNumber}-${keyUid}`;
+    logger.debug(`Rendering interpolated state for key: ${keyId}`);
+
+    const currentKeyData = keyManager.keyData[keyUid];
+    if (!currentKeyData || !currentKeyData.data) {
+        logger.error(`Key data or key.data missing for ${keyUid} during interpolated render.`);
+        keyManager.cleanupKey(serialNumber, keyUid); // Clean up if data is missing
+        return;
+    }
+
+    const {
+        currentTrackDetails, // Stores details from the last API call
+        lastApiUpdateTime,
+        progressAtLastUpdate,
+        durationMs,
+        showProgress,
+        showTitle,
+        showPlayPause,
+        titleFontSize,
+        artistFontSize
+    } = currentKeyData.data;
+
+    const isPlaying = currentPlaybackState.isPlaying; // Use global state for playing status
+    let estimatedProgress = progressAtLastUpdate;
+
+    if (isPlaying && lastApiUpdateTime > 0 && durationMs > 0) {
+        const elapsed = Date.now() - lastApiUpdateTime;
+        estimatedProgress = progressAtLastUpdate + elapsed;
+        // Clamp progress
+        if (estimatedProgress > durationMs) {
+            estimatedProgress = durationMs;
+        }
+        if (estimatedProgress < 0) {
+            estimatedProgress = 0;
+        }
+    }
+     // Use 0 if paused or no update time
+     else if (!isPlaying) {
+         estimatedProgress = progressAtLastUpdate; // Keep last known progress if paused
+     } else {
+         estimatedProgress = 0; // Default to 0 if no data yet
+     }
+
+
+    const isActive = !!(currentTrackDetails); // Active if we have track details
+
+    try {
+        const imageUrl = currentTrackDetails?.album?.images?.[0]?.url;
+        // Use stored details, fallback if none
+        const title = escapeXml(currentTrackDetails?.name || 'Nothing Playing');
+        const artist = escapeXml(currentTrackDetails?.artists?.map(a => a.name).join(', ') || '');
+
+        const buttonDataUrl = await renderer.createSpotifyButtonDataUrl(
+            currentKeyData.width || 360,
+            title,
+            artist,
+            isPlaying, // Use current playing status
+            imageUrl,
+            Math.round(estimatedProgress), // Use rounded interpolated progress
+            durationMs, // Use stored duration
+            currentKeyData.style || {},
+            showProgress,
+            showTitle,
+            showPlayPause,
+            titleFontSize,
+            artistFontSize,
+            {} // Empty options obj -> defaults to nowPlaying
+        );
+        keyManager.simpleDraw(serialNumber, currentKeyData, buttonDataUrl);
+    } catch (error) {
+        logger.error(`Error rendering interpolated now playing key ${keyId}: ${error.message}`);
+        keyManager.textOnlyDraw(serialNumber, currentKeyData, 'Error rendering');
+    }
+}
+
+
+// --- Initialization and Interaction Handlers ---
+
+/** Initialize Now Playing Key */
+async function initializeNowPlayingKey(serialNumber, key) {
+    const keyUid = key.uid;
+    const keyId = `${serialNumber}-${keyUid}`;
+    logger.info('Initializing nowplaying key:', keyId);
+
+    // Initialize data and store in keyManager
+    key.data = {
+        updateInterval: key.data?.updateInterval || 4000, // API update interval (e.g., 4s)
+        interpolationIntervalMs: key.data?.interpolationIntervalMs || 1000, // UI update interval (e.g., 1s)
+        showArtist: key.data?.showArtist !== undefined ? key.data.showArtist : true,
+        showProgress: key.data?.showProgress !== undefined ? key.data.showProgress : true,
+        showTitle: key.data?.showTitle !== undefined ? key.data.showTitle : true,
+        showPlayPause: key.data?.showPlayPause !== undefined ? key.data.showPlayPause : true,
+        titleFontSize: key.data?.titleFontSize || 18,
+        artistFontSize: key.data?.artistFontSize || 14,
+        // Interpolation state
+        currentTrackDetails: null, // Store details like name, artist, duration, image
+        lastApiUpdateTime: 0,
+        progressAtLastUpdate: 0,
+        durationMs: 0,
+        interpolationIntervalId: null, // Store the UI update interval ID
+        // apiFetchIntervalId: null // API fetch interval ID is stored in keyManager.keyIntervals
+    };
+    keyManager.keyData[keyUid] = key;
+
+    key.style = key.style || {};
+    key.style.showIcon = false;
+    key.style.showTitle = false;
+    key.style.showEmoji = false;
+    key.style.showImage = true;
+
+    try {
+        const loadingImage = await renderer.createSpotifyButtonDataUrl(
+            key.width || 360, 'Loading...', 'Connecting...', false, null, 0, 0, key.style,
+            key.data.showProgress, key.data.showTitle, key.data.showPlayPause,
+            key.data.titleFontSize, key.data.artistFontSize
+        );
+        keyManager.simpleDraw(serialNumber, key, loadingImage);
+    } catch (error) {
+        logger.error(`Failed loading image for ${keyId}: ${error.message}`);
+        keyManager.textOnlyDraw(serialNumber, key, 'Error');
+    }
+
+    // Fetch initial state AND start updates
+    await updateNowPlayingKey(serialNumber, key, true); // Pass flag to indicate it should start timers
+    // startNowPlayingUpdates(serialNumber, key); // No longer call separately, handled by updateNowPlayingKey
+}
+
+/** Start Periodic Updates (API Fetch and Interpolation) for Now Playing Key */
+function startOrRestartNowPlayingUpdates(serialNumber, key) {
+    const keyUid = key.uid;
+    const keyId = `${serialNumber}-${keyUid}`;
+    const currentKeyData = keyManager.keyData[keyUid];
+
+    if (!currentKeyData || !currentKeyData.data) {
+        logger.error(`Cannot start updates for ${keyId}, key data missing.`);
+        return;
+    }
+
+    const { updateInterval, interpolationIntervalMs } = currentKeyData.data;
+
+    // --- Clear existing timers ---
+    // Clear API Fetch Timer (stored in keyManager.keyIntervals)
+    if (keyManager.keyIntervals[keyId]) {
+        logger.debug(`Clearing existing API fetch timer for ${keyId}`);
+        clearInterval(keyManager.keyIntervals[keyId]);
+        delete keyManager.keyIntervals[keyId];
+    }
+    // Clear Interpolation Timer (stored in key.data)
+    if (currentKeyData.data.interpolationIntervalId) {
+         logger.debug(`Clearing existing interpolation timer for ${keyId}`);
+        clearInterval(currentKeyData.data.interpolationIntervalId);
+        currentKeyData.data.interpolationIntervalId = null;
+    }
+
+    // --- Start API Fetch Timer ---
+    logger.info(`Starting API fetch updates for key ${keyId} every ${updateInterval}ms.`);
+    const apiFetchIntervalId = setInterval(async () => {
+        const keyExists = keyManager.activeKeys[keyId] && keyManager.keyData[keyUid];
+        if (!keyExists) {
+            logger.info(`Key ${keyId} no longer active/valid, clearing API fetch interval.`);
+            clearInterval(apiFetchIntervalId); // Clear self
+            delete keyManager.keyIntervals[keyId];
+            // Also clear the interpolation timer if it exists
+            const latestKeyData = keyManager.keyData[keyUid]; // Re-fetch in case it changed
+            if (latestKeyData?.data?.interpolationIntervalId) {
+                 logger.info(`Clearing interpolation interval for inactive key ${keyId}.`);
+                clearInterval(latestKeyData.data.interpolationIntervalId);
+                latestKeyData.data.interpolationIntervalId = null; // Prevent memory leaks
+            }
+            return;
+        }
+        // Fetch new data (don't start timers again)
+        await updateNowPlayingKey(serialNumber, keyManager.keyData[keyUid], false);
+    }, updateInterval);
+    keyManager.keyIntervals[keyId] = apiFetchIntervalId; // Store API fetch timer ID
+
+    // --- Start Interpolation Timer ---
+     logger.info(`Starting UI interpolation updates for key ${keyId} every ${interpolationIntervalMs}ms.`);
+     const interpolationIntervalId = setInterval(async () => {
+         const keyExists = keyManager.activeKeys[keyId] && keyManager.keyData[keyUid];
+         if (!keyExists) {
+             logger.info(`Key ${keyId} no longer active/valid, clearing interpolation interval.`);
+             clearInterval(interpolationIntervalId); // Clear self
+             // Ensure the reference in key data is also cleared if cleanup didn't catch it
+             const latestKeyData = keyManager.keyData[keyUid];
+             if (latestKeyData?.data?.interpolationIntervalId === interpolationIntervalId) {
+                latestKeyData.data.interpolationIntervalId = null;
+             }
+             return;
+         }
+         // Render using interpolated data
+         await renderInterpolatedNowPlaying(serialNumber, keyManager.keyData[keyUid]);
+     }, interpolationIntervalMs);
+     // Store interpolation timer ID in key data
+     currentKeyData.data.interpolationIntervalId = interpolationIntervalId;
+
+}
+
+/** Update Now Playing Key Display and Fetch State */
+// Add 'shouldStartTimers' flag, defaults to false
+async function updateNowPlayingKey(serialNumber, key, shouldStartTimers = false) {
+    const keyUid = key.uid;
+    const keyId = `${serialNumber}-${keyUid}`;
+    logger.debug(`Updating now playing key state: ${keyId}`);
+
+    // Retrieve the latest key data from the manager BEFORE the API call
+    let currentKeyData = keyManager.keyData[keyUid];
+    if (!currentKeyData) {
+        logger.error(`Key data for ${keyUid} not found during update start.`);
+        keyManager.cleanupKey(serialNumber, keyUid);
+        return;
+    }
+
+    if (!keyManager.activeKeys[keyId]) {
+        logger.warn(`Attempted to update inactive key ${keyId}, cleaning up.`);
+        keyManager.cleanupKey(serialNumber, keyUid); // Let cleanup handle timers
+        return;
+    }
+
+    let playbackState = null;
+    let fetchError = null;
+    let needsAuth = false;
+    try {
+        if (!spotifyAuth.getAuthenticationStatus()) {
+            const initSuccess = await spotifyAuth.initializeAuthentication();
+            if (!initSuccess) {
+                needsAuth = true;
+                throw new Error('Authentication required and initialization failed.');
+            }
+        }
+        playbackState = await spotifyApi.getCurrentPlayback();
+    } catch (error) {
+        logger.error(`Error fetching playback state for ${keyId}: ${error.message}`);
+        fetchError = error;
+        // If auth is needed, render a specific state? For now, relies on generic error render.
+    }
+
+    // --- Process fetched state ---
+    const now = Date.now();
+    const isActive = !!(playbackState && playbackState.item);
+    const isPlaying = isActive && playbackState.is_playing;
+    const currentTrack = isActive ? playbackState.item : null;
+    const trackId = currentTrack?.id;
+    const progressMs = isActive ? playbackState.progress_ms : 0;
+    const durationMs = currentTrack?.duration_ms || 0;
+
+    // --- Update Global Playback State ---
+    let previousTrackId = currentPlaybackState.trackId;
+    currentPlaybackState.isActive = isActive;
+    currentPlaybackState.isPlaying = isPlaying;
+    currentPlaybackState.trackId = trackId;
+    // Update global interpolation helpers
+    currentPlaybackState.progressAtLastUpdate = progressMs;
+    currentPlaybackState.lastApiUpdateTime = now;
+    currentPlaybackState.durationMs = durationMs;
+
+    let trackChanged = false;
+    let likedStatusChanged = false; // Renamed from likedStatusChanged for clarity
+
+    if (trackId !== previousTrackId) {
+        trackChanged = true;
+        logger.info(`Track changed: ${trackId} (was ${previousTrackId})`);
+        currentPlaybackState.isLiked = null; // Reset like status
+
+        if (isActive && trackId && trackId !== currentPlaybackState.lastCheckedTrackId) {
+            logger.debug(`Checking liked status for new track: ${trackId}`);
+            try {
+                const savedStatus = await spotifyApi.checkTracksSaved([trackId]);
+                if (savedStatus && savedStatus.length > 0) {
+                    currentPlaybackState.isLiked = savedStatus[0];
+                    likedStatusChanged = true; // Mark that we got a definitive status
+                    logger.info(`Track ${trackId} liked status: ${currentPlaybackState.isLiked}`);
+                } else {
+                    logger.warn(`Could not determine liked status for track ${trackId}`);
+                }
+                currentPlaybackState.lastCheckedTrackId = trackId;
+            } catch (error) {
+                logger.error(`Error checking if track ${trackId} is saved: ${error.message}`);
+            }
+        } else if (!isActive) {
+            // Playback stopped or became inactive
+            logger.info("Playback stopped or became inactive.");
+            currentPlaybackState.isLiked = null;
+            currentPlaybackState.lastCheckedTrackId = null;
+        }
+    }
+    // --- End Update Global Playback State ---
+
+    // Re-fetch key data in case it was modified during async operations
+    currentKeyData = keyManager.keyData[keyUid];
+    if (!currentKeyData || !currentKeyData.data) {
+        logger.error(`Key data for ${keyUid} disappeared during update processing.`);
+        keyManager.cleanupKey(serialNumber, keyUid); // Clean up if data is missing
+        return;
+    }
+
+    // --- Update Key-Specific Data for Interpolation ---
+    currentKeyData.data.currentTrackDetails = currentTrack; // Store the whole item or necessary parts
+    currentKeyData.data.lastApiUpdateTime = now;
+    currentKeyData.data.progressAtLastUpdate = progressMs;
+    currentKeyData.data.durationMs = durationMs;
+    // --- End Update Key-Specific Data ---
+
+    // --- Start or Restart Timers if requested (e.g., on initialization) ---
+    if (shouldStartTimers) {
+        logger.debug(`Starting/Restarting timers for ${keyId} after initial fetch.`);
+        startOrRestartNowPlayingUpdates(serialNumber, currentKeyData);
+    }
+
+    // --- Trigger Interpolated Render ---
+    // Always render immediately after fetching new data using the interpolation function
+    logger.debug(`Triggering immediate interpolated render for ${keyId} after API update.`);
+    await renderInterpolatedNowPlaying(serialNumber, currentKeyData);
+    // --- End Trigger Interpolated Render ---
+
+
+    // --- Trigger Update for Like Keys if needed ---
+    if (trackChanged || likedStatusChanged) {
+        logger.debug(`Track or liked status change detected. Updating relevant like keys.`);
+        Object.keys(keyManager.activeKeys).forEach(activeKeyId => {
+            const [sn, likeKeyUid] = activeKeyId.split('-');
+            const likeKey = keyManager.keyData[likeKeyUid];
+            // Check if it's a like key and if the update is relevant (same track context)
+            if (likeKey && likeKey.cid === 'com.energy.spotify_integration.like') {
+                // Update the key data directly before redraw
+                likeKey.data = likeKey.data || {}; // Ensure data object exists
+                likeKey.data.currentTrackId = currentPlaybackState.trackId; // Update with latest trackId
+                likeKey.data.isLiked = currentPlaybackState.isLiked; // Update with latest liked status
+                logger.debug(`Updating like key ${activeKeyId} display - Track: ${likeKey.data.currentTrackId}, Liked: ${likeKey.data.isLiked}`);
+                updateLikeKeyDisplay(sn, likeKey); // Trigger redraw
+            }
+        });
+    }
+    // --- End Trigger Update for Like Keys ---
 }
 
 module.exports = {

@@ -13,17 +13,30 @@
               <v-col cols="12" sm="4">
                 <v-text-field
                   v-model="modelValue.data.updateInterval"
-                  label="Update Interval (ms)"
+                  label="API Update Interval (ms)"
                   type="number"
                   min="1000"
-                  hint="Min 1000ms"
+                  hint="How often to fetch data (min 1000)"
                   persistent-hint
                   density="compact"
                   variant="outlined"
                   @update:model-value="updateInterval"
                 ></v-text-field>
               </v-col>
-
+              <v-col cols="12" sm="4">
+                <v-text-field
+                  v-model="modelValue.data.interpolationIntervalMs"
+                  label="UI Update Interval (ms)"
+                  type="number"
+                  min="100"
+                  :disabled="!modelValue.data.enableInterpolation"
+                  hint="Smoothness (min 100, if enabled)"
+                  persistent-hint
+                  density="compact"
+                  variant="outlined"
+                  @update:model-value="updateInterpolationInterval"
+                ></v-text-field>
+              </v-col>
               <v-col cols="12" sm="4">
                 <v-text-field
                   v-model="modelValue.data.titleFontSize"
@@ -60,6 +73,11 @@
 
           <v-list lines="one" density="compact">
             <v-list-subheader>DISPLAY OPTIONS</v-list-subheader>
+            <v-list-item title="Enable Smooth Progress">
+              <template v-slot:append>
+                <v-switch v-model="modelValue.data.enableInterpolation" hide-details inset color="primary"></v-switch>
+              </template>
+            </v-list-item>
             <v-list-item title="Show Title">
               <template v-slot:append>
                 <v-switch v-model="modelValue.data.showTitle" hide-details inset color="primary"></v-switch>
@@ -90,7 +108,9 @@
 <script>
 const DEFAULT_MODEL_VALUE = {
   data: {
-    updateInterval: 5000,
+    updateInterval: 4000, // Default API interval
+    interpolationIntervalMs: 1000, // Default UI interval
+    enableInterpolation: true, // Default to enabled
     showArtist: true,
     showProgress: true,
     currentTrack: null,
@@ -114,7 +134,6 @@ export default {
   data() {
     return {
       isInitialized: false,
-      refreshInterval: null,
     };
   },
   methods: {
@@ -134,7 +153,13 @@ export default {
       if (isNaN(parsedVal) || parsedVal < minInterval) {
         this.modelValue.data.updateInterval = minInterval;
       }
-      this.resetInterval();
+    },
+    updateInterpolationInterval(value) {
+      const parsedVal = parseInt(value);
+      const minInterval = 100; // Allow faster UI updates
+      if (isNaN(parsedVal) || parsedVal < minInterval) {
+        this.modelValue.data.interpolationIntervalMs = minInterval;
+      }
     },
     updateTitleFontSize(value) {
       const parsedVal = parseInt(value);
@@ -156,27 +181,13 @@ export default {
         this.modelValue.data.artistFontSize = maxSize;
       }
     },
-    resetInterval() {
-      if (this.refreshInterval) {
-        clearInterval(this.refreshInterval);
-      }
-      
-      const interval = parseInt(this.modelValue?.data?.updateInterval) || 5000;
-      this.refreshInterval = setInterval(() => {
-        this.updatePlaybackInfo();
-      }, Math.max(interval, 1000));
-    }
   },
   created() {
     this.initializeModelValue();
   },
   mounted() {
-    this.resetInterval();
   },
   beforeUnmount() {
-    if (this.refreshInterval) {
-      clearInterval(this.refreshInterval);
-    }
   }
 };
 </script>

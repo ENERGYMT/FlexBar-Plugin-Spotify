@@ -1,4 +1,5 @@
-const { plugin, logger } = require("@eniac/flexdesigner");
+const { plugin } = require("@eniac/flexdesigner");
+const logger = require("./loggerWrapper");
 
 // --- State Management --- //
 

@@ -1,5 +1,6 @@
-const { plugin, logger } = require("@eniac/flexdesigner");
+const { plugin } = require("@eniac/flexdesigner");
 const auth = require('./spotifyAuth'); // Import the authentication module
+const logger = require("./loggerWrapper"); // Add this line
 
 // Basic Spotify API wrapper
 const spotifyApi = {

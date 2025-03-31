@@ -1,6 +1,7 @@
-const { plugin, logger } = require("@eniac/flexdesigner");
+const { plugin } = require("@eniac/flexdesigner");
 const open = require('open');
 const http = require('http');
+const logger = require("./loggerWrapper");
 
 // Store auth tokens locally within this module
 let spotifyTokens = {
