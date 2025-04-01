@@ -5,7 +5,7 @@
     "author": "ENERGY",
     "entry": "backend/plugin.cjs",
     "description": "Spotify Integration for FlexBar",
-    "repo": "",
+    "repo": "https://github.com/ENERGYMT/FlexBar-Plugin-Spotify",
     "sdk": {
         "version": "1.0.0"
     },
