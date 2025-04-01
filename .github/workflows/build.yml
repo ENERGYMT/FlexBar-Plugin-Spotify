@@ -12,16 +12,15 @@ jobs:
     strategy:
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
-        node-version: [20.x]
+        node-version: [20]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v3
     
     - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v3
       with:
         node-version: ${{ matrix.node-version }}
-        cache: 'npm'
     
     - name: Install dependencies
       run: npm install
@@ -36,7 +35,7 @@ jobs:
       run: npm run plugin:pack
       
     - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
+      uses: softprops/action-gh-release@v2
       with:
         name: plugin-${{ matrix.os }}
         path: com.energy.spotify_integration.flexplugin 
