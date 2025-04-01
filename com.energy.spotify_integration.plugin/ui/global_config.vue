@@ -234,11 +234,19 @@ export default {
             this.notifications.auth.show = true;
             
             try {
+                // Save the configuration first to ensure the backend has the latest credentials
+                await this.saveConfig();
+                
                 // Send authentication request to the backend plugin
                 const response = await this.$fd.sendToBackend({
                     data: 'spotify-auth',
                     config: this.modelValue.config
                 });
+
+                // Add null check for the response
+                if (!response) {
+                    throw new Error("No response received from backend");
+                }
 
                 if (response.success) {
                     // Get the updated config with tokens from backend
@@ -259,7 +267,7 @@ export default {
                     throw new Error(response.error || "Authentication failed");
                 }
             } catch (error) {
-                this.$fd.info('Auth error:', error);
+                this.$fd.error('Auth error:', error);
                 
                 // Show error notification
                 this.notifications.auth.message = `Could not connect to Spotify: ${error.message}`;
