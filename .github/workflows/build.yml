@@ -35,7 +35,7 @@ jobs:
       run: npm run plugin:pack
       
     - name: Upload build artifacts
-      uses: softprops/action-gh-release@v2
+      uses: actions/upload-artifact@v4
       with:
         name: plugin-${{ matrix.os }}
         path: com.energy.spotify_integration.flexplugin 
