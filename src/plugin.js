@@ -17,7 +17,8 @@ let currentPlaybackState = {
     isPlaying: false,
     progressAtLastUpdate: 0,
     lastApiUpdateTime: 0,
-    durationMs: 0
+    durationMs: 0,
+    songEndTimerId: null // Timer ID for song end detection
 };
 
 
@@ -51,13 +52,27 @@ function _handleDeviceStatus(devices) {
     logger.info('Device status changed (handler):', devices);
     const connectedSerialNumbers = devices.map(device => String(device.serialNumber));
     
+    // Check if there are any now playing keys still active
+    let nowPlayingKeysRemain = false;
+    
     Object.keys(keyManager.activeKeys).forEach(keyId => { 
         const [serialNumber, keyUid] = keyId.split('-');
         if (!connectedSerialNumbers.includes(serialNumber)) {
             logger.info(`Device ${serialNumber} disconnected, cleaning up key ${keyUid} via handler`);
             keyManager.cleanupKey(serialNumber, keyUid); 
+        } else {
+            // Device is still connected, check if this is a now playing key
+            const key = keyManager.keyData[keyUid];
+            if (key && key.cid === 'com.energy.spotify_integration.nowplaying') {
+                nowPlayingKeysRemain = true;
+            }
         }
     });
+    
+    // If no now playing keys remain, clear the song end timer
+    if (!nowPlayingKeysRemain) {
+        clearSongEndTimer();
+    }
 }
 
 function _handlePluginAlive(payload) {
@@ -85,6 +100,9 @@ function _handlePluginAlive(payload) {
          logger.debug(`[plugin.alive] No stale keys to clean up for device ${serialNumber}.`);
     }
 
+    // Track if we found any now playing keys
+    let hasNowPlayingKey = false;
+
     for (const key of incomingKeys) {
         const keyUid = key.uid;
         if (keyUid === undefined || keyUid === null) {
@@ -96,6 +114,20 @@ function _handlePluginAlive(payload) {
         const wasAlreadyActive = keyManager.activeKeys[keyId];
         keyManager.activeKeys[keyId] = true;
         keyManager.keyData[keyUid] = key;
+
+        if (key.cid === 'com.energy.spotify_integration.nowplaying') {
+            hasNowPlayingKey = true;
+            
+            // If this now playing key is newly active, we need to setup the song end timer
+            if (!wasAlreadyActive && currentPlaybackState.isActive && currentPlaybackState.isPlaying) {
+                logger.debug(`[plugin.alive] Setting up song end timer for new now playing key: ${keyId}`);
+                setupSongEndTimer(
+                    currentPlaybackState.progressAtLastUpdate, 
+                    currentPlaybackState.durationMs, 
+                    currentPlaybackState.isPlaying
+                );
+            }
+        }
 
         if (!wasAlreadyActive) {
             logger.info(`[plugin.alive] Initializing NEW key: ${key.cid} (UID: ${keyUid}) on device ${serialNumber}`);
@@ -110,7 +142,13 @@ function _handlePluginAlive(payload) {
              logger.debug(`[plugin.alive] Key ${keyId} confirmed active.`);
         }
     }
-     logger.debug(`[plugin.alive] Finished processing keys for device ${serialNumber}.`);
+
+    // If no now playing keys exist, clear the song end timer
+    if (!hasNowPlayingKey) {
+        clearSongEndTimer();
+    }
+
+    logger.debug(`[plugin.alive] Finished processing keys for device ${serialNumber}.`);
 }
 
 function _handlePluginData(payload) {
@@ -135,16 +173,11 @@ function _handlePluginData(payload) {
              logger.warn(`Data for key ${keyUid} was missing, using received data (handler).`);
         }
     }
+    logger.info(`Received plugin.data for key ${key} (handler).`);
     
     if (key.cid === "com.energy.spotify_integration.nowplaying") {
         handleNowPlayingInteraction(serialNumber, key, data);
         return { status: "success", message: "Handled now playing interaction." };
-    } else if (key.cid === "com.energy.spotify_integration.counter") {
-         handleCounterInteraction(serialNumber, key, data);
-         return { status: "success", message: "Handled counter interaction." };
-    } else if (key.cid === "com.energy.spotify_integration.cyclebutton") {
-        logger.info(`Cycle button interaction: state=${data.state} (handler)`);
-        return { status: "success", message: `Cycle button state: ${data.state}` };
     } else if (key.cid === "com.energy.spotify_integration.like") {
         handleLikeInteraction(serialNumber, key, data);
         return { status: "success", message: "Handled like interaction." };
@@ -152,6 +185,54 @@ function _handlePluginData(payload) {
     
      logger.warn(`Unhandled key interaction via handler for CID: ${key.cid}`);
      return { status: "ignored", message: `No handler for CID ${key.cid}` };
+}
+
+/** 
+ * Setup or update the song end timer for automatic playback refresh
+ * @param {number} progressMs Current playback position in ms
+ * @param {number} durationMs Total song duration in ms
+ * @param {boolean} isPlaying Whether playback is currently active
+ */
+function setupSongEndTimer(progressMs, durationMs, isPlaying) {
+    // Clear any existing timer first
+    if (currentPlaybackState.songEndTimerId) {
+        logger.debug('Clearing existing song end timer');
+        clearTimeout(currentPlaybackState.songEndTimerId);
+        currentPlaybackState.songEndTimerId = null;
+    }
+
+    // Only set up a timer if the song is playing
+    if (!isPlaying || !durationMs) {
+        logger.debug('Not setting song end timer - playback inactive or no duration');
+        return;
+    }
+
+    // Calculate remaining time (with a small buffer to ensure we're past the end)
+    const remainingMs = Math.max(0, durationMs - progressMs + 200); // 200ms buffer
+    
+    logger.debug(`Setting song end timer for ${remainingMs}ms (Progress: ${progressMs}ms, Duration: ${durationMs}ms)`);
+    
+    // Set the timeout to call getCurrentPlayback when the song should end
+    currentPlaybackState.songEndTimerId = setTimeout(async () => {
+        logger.info('Song end timer triggered - requesting current playback state');
+        try {
+            const playbackState = await spotifyApi.getCurrentPlayback();
+            logger.debug('Successfully fetched playback after song end');
+            
+            // Iterate through all now playing keys and update them
+            Object.keys(keyManager.activeKeys).forEach(keyId => {
+                const [serialNumber, keyUid] = keyId.split('-');
+                const key = keyManager.keyData[keyUid];
+                if (key && key.cid === 'com.energy.spotify_integration.nowplaying') {
+                    logger.debug(`Updating now playing key ${keyId} after song end`);
+                    updateNowPlayingKey(serialNumber, key, false);
+                }
+            });
+        } catch (error) {
+            logger.error(`Error fetching playback after song end: ${error.message}`);
+        }
+        currentPlaybackState.songEndTimerId = null;
+    }, remainingMs);
 }
 
 // --- Plugin Event Listener Setup --- //
@@ -176,6 +257,15 @@ plugin.on('ui.message', async (payload) => { /* Original - No change needed here
     } catch (error) {
         const needsAuth = !spotifyAuth.getAuthenticationStatus() || error.message.includes('authenticate');
         return { success: false, error: error.message, needsAuth };
+    }
+});
+
+// Register this function as a listener for keyManager cleanup operations
+// This ensures our song end timer is cleared when the now playing key is removed
+plugin.on('device.status', (devices) => {
+    // If no devices are connected, clear the song end timer
+    if (!devices || devices.length === 0) {
+        clearSongEndTimer();
     }
 });
 
@@ -437,7 +527,13 @@ async function updateNowPlayingKey(serialNumber, key, shouldStartTimers = false)
     const progressMs = isActive ? playbackState.progress_ms : 0;
     const durationMs = currentTrack?.duration_ms || 0;
 
+    // Store previous state for comparison
     let previousTrackId = currentPlaybackState.trackId;
+    let previousProgress = currentPlaybackState.progressAtLastUpdate;
+    let previousDuration = currentPlaybackState.durationMs;
+    let previousPlaying = currentPlaybackState.isPlaying;
+    
+    // Update state
     currentPlaybackState.isActive = isActive;
     currentPlaybackState.isPlaying = isPlaying;
     currentPlaybackState.trackId = trackId;
@@ -447,6 +543,14 @@ async function updateNowPlayingKey(serialNumber, key, shouldStartTimers = false)
 
     let trackChanged = false;
     let likedStatusChanged = false;
+    let seekOccurred = false;
+
+    // Detect if a seek operation occurred
+    if (isPlaying && previousPlaying && trackId === previousTrackId && 
+        Math.abs((progressMs - previousProgress) - (now - currentPlaybackState.lastApiUpdateTime)) > 1000) {
+        seekOccurred = true;
+        logger.info(`Seek detected: Progress jumped from ${previousProgress}ms to ${progressMs}ms`);
+    }
 
     if (trackId !== previousTrackId) {
         trackChanged = true;
@@ -497,6 +601,11 @@ async function updateNowPlayingKey(serialNumber, key, shouldStartTimers = false)
     if (shouldStartTimers) {
         startOrRestartNowPlayingUpdates(serialNumber, currentKeyData);
         await renderInterpolatedNowPlaying(serialNumber, currentKeyData);
+    }
+
+    if (trackChanged || likedStatusChanged || seekOccurred || isPlaying !== previousPlaying || durationMs !== previousDuration) {
+        logger.debug(`Setting up song end timer due to: ${trackChanged ? 'track change' : seekOccurred ? 'seek' : 'play state change'}`);
+        setupSongEndTimer(progressMs, durationMs, isPlaying);
     }
 
     if (trackChanged || likedStatusChanged) {
@@ -695,28 +804,20 @@ async function handleNowPlayingInteraction(serialNumber, key, data) {
     }
 }
 
-/** Handle Interaction for Counter Key */
-function handleCounterInteraction(serialNumber, key, data) {
-    const keyUid = key.uid;
-     if (!keyManager.keyData[keyUid]) { initializeCounterKey(serialNumber, key); }
-     else { Object.assign(keyManager.keyData[keyUid], key); }
-     const currentKeyData = keyManager.keyData[keyUid];
 
-    if (data.evt === 'click') {
-        let counter = currentKeyData.counter || 0;
-        const max = parseInt(currentKeyData.data?.rangeMax || '10');
-        const min = parseInt(currentKeyData.data?.rangeMin || '0');
-        counter++;
-        if (counter > max) counter = min; 
-        currentKeyData.counter = counter;
-        currentKeyData.title = `Count: ${counter}`;
-        
-        keyManager.simpleTextDraw(serialNumber, currentKeyData); 
-    } 
+/**
+ * Reset and clear the song end timer if it exists
+ */
+function clearSongEndTimer() {
+    if (currentPlaybackState.songEndTimerId) {
+        logger.debug('Clearing song end timer during cleanup');
+        clearTimeout(currentPlaybackState.songEndTimerId);
+        currentPlaybackState.songEndTimerId = null;
+    }
 }
 
 // --- Plugin Start & Global Handlers --- //
-plugin.start()
+plugin.start();
 process.on('uncaughtException', (error) => { 
     logger.error('Uncaught exception:', error);
 });
