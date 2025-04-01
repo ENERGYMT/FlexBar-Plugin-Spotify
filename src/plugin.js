@@ -2,81 +2,48 @@ const { plugin, pluginPath, resourcesPath } = require("@eniac/flexdesigner")
 const logger = require("./loggerWrapper")
 const path = require('path')
 const open = require('open')
-// Remove canvas requires if they are no longer needed directly in plugin.js
-// const { createCanvas, loadImage } = require('@napi-rs/canvas') 
-const { 
-    // Remove rendering-related utils if they are only used in canvasRenderer now
-    // adjustColor, // Moved?
-    // truncateText, // Moved?
-    // createFallbackImage, // Moved?
-    // getImageColors, // Moved?
-    escapeXml,
-    // roundedRect // Moved?
-} = require('./utils');
+const { escapeXml } = require('./utils');
 const spotifyAuth = require('./spotifyAuth'); 
 const spotifyApi = require('./spotifyApi'); 
-const renderer = require('./canvasRenderer'); // Require the renderer
-const keyManager = require('./keyManager'); // ADD require
+const renderer = require('./canvasRenderer'); 
+const keyManager = require('./keyManager'); 
 
-// --- Global State for Playback ---
+// Global state for tracking Spotify playback
 let currentPlaybackState = {
     trackId: null,
     isLiked: null,
-    lastCheckedTrackId: null, // Track the ID we last checked the liked status for
-    isActive: false, // Is Spotify actively playing something?
-    isPlaying: false, // Is it currently playing vs paused?
+    lastCheckedTrackId: null,
+    isActive: false,
+    isPlaying: false,
     progressAtLastUpdate: 0,
     lastApiUpdateTime: 0,
     durationMs: 0
 };
-// --- End Global State ---
 
-// --- Remove Key Management State --- //
-// const keyData = {}; 
-// var feedbackKeys = []; // Still keep locally?
-// const keyIntervals = {};
-// const activeKeys = {};
-// let lastUpdateTime = 0;
-// const MIN_UPDATE_INTERVAL = 2000;
 
-// var feedbackKeys = []; // Remove this unused variable
 
 logger.info(`Plugin path: ${pluginPath}`)
 logger.info(`Plugin Resources path: ${resourcesPath}`)
 
-// --- Remove Key Management Function Definitions --- //
-// function cleanupKey(...) { ... }
-// function isDeviceConnected(...) { ... }
-// function simpleDraw(...) { ... }
-// function textOnlyDraw(...) { ... }
-// function throttledUpdateCheck(...) { ... }
-// function simpleTextDraw(...) { ... }
 
-// --- Canvas Function Placeholders (Removed previously) --- //
+// async function controlSpotify(action, value = null) {  }
 
-// --- Event Handlers / Logic (Using keyManager) --- //
+// function triggerNowPlayingUpdate() {
+//     logger.info("Triggering manual update for all active 'now playing' and 'like' keys.");
+//     Object.keys(keyManager.activeKeys).forEach(keyId => {
+//         const [serialNumber, keyUid] = keyId.split('-');
+//         const key = keyManager.keyData[keyUid];
+//         if (!key) return;
 
-async function controlSpotify(action, value = null) { /* Original - No change */ }
-
-// Implement triggerNowPlayingUpdate using keyManager
-function triggerNowPlayingUpdate() {
-    logger.info("Triggering manual update for all active 'now playing' and 'like' keys.");
-    Object.keys(keyManager.activeKeys).forEach(keyId => {
-        const [serialNumber, keyUid] = keyId.split('-');
-        const key = keyManager.keyData[keyUid];
-        if (!key) return; // Skip if key data somehow missing
-
-        // Trigger update for both now playing and like keys
-        if (key.cid === 'com.energy.spotify_integration.nowplaying') {
-            logger.debug(`Manually updating now playing key ${keyId}`);
-            updateNowPlayingKey(serialNumber, key, true); // Will fetch new state and update relevant keys
-        } else if (key.cid === 'com.energy.spotify_integration.like') {
-            // Just ensure it redraws with current state
-            logger.debug(`Manually updating like key display ${keyId}`);
-            updateLikeKeyDisplay(serialNumber, key);
-        }
-    });
-}
+//         if (key.cid === 'com.energy.spotify_integration.nowplaying') {
+//             logger.debug(`Manually updating now playing key ${keyId}`);
+//             updateNowPlayingKey(serialNumber, key, true);
+//         } else if (key.cid === 'com.energy.spotify_integration.like') {
+//             logger.debug(`Manually updating like key display ${keyId}`);
+//             updateLikeKeyDisplay(serialNumber, key);
+//         }
+//     });
+// }
 
 // --- Refactored Event Handler Logic (Update to use keyManager) --- //
 
@@ -84,7 +51,6 @@ function _handleDeviceStatus(devices) {
     logger.info('Device status changed (handler):', devices);
     const connectedSerialNumbers = devices.map(device => String(device.serialNumber));
     
-    // Use keyManager.activeKeys and keyManager.cleanupKey
     Object.keys(keyManager.activeKeys).forEach(keyId => { 
         const [serialNumber, keyUid] = keyId.split('-');
         if (!connectedSerialNumbers.includes(serialNumber)) {
@@ -96,17 +62,15 @@ function _handleDeviceStatus(devices) {
 
 function _handlePluginAlive(payload) {
     logger.info('Processing plugin.alive (handler):', payload);
-    const incomingKeys = payload.keys || []; // Ensure it's an array
+    const incomingKeys = payload.keys || [];
     const serialNumber = String(payload.serialNumber);
-    const incomingKeyUids = new Set(incomingKeys.map(k => k.uid).filter(uid => uid !== undefined && uid !== null)); // Set of valid UIDs from payload
+    const incomingKeyUids = new Set(incomingKeys.map(k => k.uid).filter(uid => uid !== undefined && uid !== null));
 
     logger.debug(`[plugin.alive] Handler received ${incomingKeys.length} keys for device ${serialNumber}. UIDs: ${Array.from(incomingKeyUids)}`);
 
-    // --- Step 1: Clean up stale keys ---
     const keysToCleanup = [];
     Object.keys(keyManager.activeKeys).forEach(keyId => {
         const [sn, keyUid] = keyId.split('-');
-        // Check if this key belongs to the current device and is NOT in the incoming list
         if (sn === serialNumber && !incomingKeyUids.has(keyUid)) {
             keysToCleanup.push({ serialNumber: sn, keyUid });
         }
@@ -115,14 +79,12 @@ function _handlePluginAlive(payload) {
     if (keysToCleanup.length > 0) {
         logger.info(`[plugin.alive] Cleaning up ${keysToCleanup.length} stale keys for device ${serialNumber}:`, keysToCleanup.map(k => k.keyUid));
         keysToCleanup.forEach(({ serialNumber: sn, keyUid }) => {
-            keyManager.cleanupKey(sn, keyUid); // Call cleanup for each stale key
+            keyManager.cleanupKey(sn, keyUid);
         });
     } else {
          logger.debug(`[plugin.alive] No stale keys to clean up for device ${serialNumber}.`);
     }
 
-
-    // --- Step 2: Process incoming keys (add new/update existing) ---
     for (const key of incomingKeys) {
         const keyUid = key.uid;
         if (keyUid === undefined || keyUid === null) {
@@ -131,20 +93,12 @@ function _handlePluginAlive(payload) {
         }
         const keyId = `${serialNumber}-${keyUid}`;
 
-        // Check if this key is NEW or just confirming it's still alive
         const wasAlreadyActive = keyManager.activeKeys[keyId];
-
-        // Always ensure data is up-to-date and key is marked active
         keyManager.activeKeys[keyId] = true;
-        
-        // Merge incoming data with existing? For now, let's just store the latest from payload
-        // If merging is needed, fetch existing keyManager.keyData[keyUid] first
         keyManager.keyData[keyUid] = key;
 
         if (!wasAlreadyActive) {
-            // This key is newly added or the plugin just started
             logger.info(`[plugin.alive] Initializing NEW key: ${key.cid} (UID: ${keyUid}) on device ${serialNumber}`);
-            // Call the appropriate initialization function
             if (key.cid === 'com.energy.spotify_integration.nowplaying') {
                 initializeNowPlayingKey(serialNumber, key);
             } else if (key.cid === 'com.energy.spotify_integration.counter') {
@@ -153,10 +107,7 @@ function _handlePluginAlive(payload) {
                 initializeLikeKey(serialNumber, key);
             }
         } else {
-            // Key was already active, just confirmed alive. Maybe log?
              logger.debug(`[plugin.alive] Key ${keyId} confirmed active.`);
-             // Potentially trigger a redraw if settings could have changed?
-             // Or rely on the key's own update interval. For now, do nothing extra.
         }
     }
      logger.debug(`[plugin.alive] Finished processing keys for device ${serialNumber}.`);
@@ -176,18 +127,15 @@ function _handlePluginData(payload) {
     const keyUid = key.uid;
     const keyId = `${serialNumber}-${keyUid}`;
 
-    // Use keyManager state
     if (!keyManager.activeKeys[keyId]) { 
         logger.warn(`Received interaction for inactive key ${keyId} (handler). Re-registering.`);
         keyManager.activeKeys[keyId] = true;
         if (!keyManager.keyData[keyUid]) {
-             keyManager.keyData[keyUid] = key; // Use keyManager state
+             keyManager.keyData[keyUid] = key;
              logger.warn(`Data for key ${keyUid} was missing, using received data (handler).`);
-             // Consider re-initializing?
         }
     }
     
-    // Delegate to local interaction handlers (these will need keyManager too)
     if (key.cid === "com.energy.spotify_integration.nowplaying") {
         handleNowPlayingInteraction(serialNumber, key, data);
         return { status: "success", message: "Handled now playing interaction." };
@@ -223,15 +171,6 @@ plugin.on('ui.message', async (payload) => { /* Original - No change needed here
     try {
         switch (payload.data) {
             case 'get-playback': return { success: true, data: await spotifyApi.getCurrentPlayback() };
-            case 'get-playlists': return { success: true, data: await spotifyApi.getUserPlaylists(payload.limit, payload.offset) };
-            case 'search': 
-                 if (!payload.query) return { success: false, error: 'Query required.' };
-                 return { success: true, data: await spotifyApi.search(payload.query, payload.types, payload.limit, payload.offset) };
-            case 'spotify-control':
-                 if (!payload.action) return { success: false, error: 'Action required.' };
-                await controlSpotify(payload.action, payload.value || payload.volume);
-                 triggerNowPlayingUpdate(); 
-                return { success: true, message: `Action '${payload.action}' successful` };
             default: return { success: false, error: 'Unknown command' };
         }
     } catch (error) {
@@ -255,22 +194,22 @@ async function renderInterpolatedNowPlaying(serialNumber, key) {
     const currentKeyData = keyManager.keyData[keyUid];
     if (!currentKeyData || !currentKeyData.data) {
         logger.error(`Key data or key.data missing for ${keyUid} during interpolated render.`);
-        keyManager.cleanupKey(serialNumber, keyUid); // Clean up if data is missing
+        keyManager.cleanupKey(serialNumber, keyUid);
         return;
     }
 
     const {
-        currentTrackDetails, // Stores details from the last API call
+        currentTrackDetails,
         lastApiUpdateTime,
         progressAtLastUpdate,
         durationMs,
         showProgress,
         showTitle,
         showPlayPause,
-        showTimeInfo, // Extract showTimeInfo
+        showTimeInfo,
         titleFontSize,
         artistFontSize,
-        timeFontSize, // Extract timeFontSize
+        timeFontSize,
     } = currentKeyData.data;
 
     const isPlaying = currentPlaybackState.isPlaying;
@@ -291,30 +230,29 @@ async function renderInterpolatedNowPlaying(serialNumber, key) {
 
     try {
         const imageUrl = currentTrackDetails?.album?.images?.[0]?.url;
-        const title = escapeXml(currentTrackDetails?.name || (isActive ? 'Loading...' : 'Nothing Playing')); // Adjust fallback
+        const title = escapeXml(currentTrackDetails?.name || (isActive ? 'Loading...' : 'Nothing Playing'));
         const artist = escapeXml(currentTrackDetails?.artists?.map(a => a.name).join(', ') || '');
 
         const buttonDataUrl = await renderer.createSpotifyButtonDataUrl(
             currentKeyData.width || 360,
             title,
             artist,
-            isPlaying, // Use current playing status
+            isPlaying,
             imageUrl,
-            Math.round(estimatedProgress), // Use rounded interpolated progress
-            durationMs, // Use stored duration
+            Math.round(estimatedProgress),
+            durationMs,
             currentKeyData.style || {},
             showProgress,
             showTitle,
             showPlayPause,
             titleFontSize,
             artistFontSize,
-            showTimeInfo, // Pass showTimeInfo 
-            timeFontSize, // Pass timeFontSize
-            {} // Empty options obj -> defaults to nowPlaying
+            showTimeInfo,
+            timeFontSize,
+            {}
         );
         keyManager.simpleDraw(serialNumber, currentKeyData, buttonDataUrl);
     } catch (error) {
-
         try {
              keyManager.textOnlyDraw(serialNumber, currentKeyData, 'Render Error');
         } catch (fallbackError) {
@@ -329,60 +267,50 @@ async function initializeNowPlayingKey(serialNumber, key) {
     const keyId = `${serialNumber}-${keyUid}`;
     logger.info('Initializing nowplaying key:', keyId);
 
-    // Ensure data object exists
     key.data = key.data || {};
-    
-    // Extract progressBarColor from the incoming key
     const progressBarColor = key.data.progressBarColor || '#1DB954';
 
-    // Initialize data and store in keyManager, applying defaults from UI if not present
     key.data = {
-        updateInterval: key.data.updateInterval || 4000, // API update interval
-        interpolationIntervalMs: key.data.interpolationIntervalMs || 1000, // UI update interval
-        enableInterpolation: key.data.enableInterpolation !== undefined ? key.data.enableInterpolation : true, // Optional interpolation
+        updateInterval: key.data.updateInterval || 4000,
+        interpolationIntervalMs: key.data.interpolationIntervalMs || 1000,
+        enableInterpolation: key.data.enableInterpolation !== undefined ? key.data.enableInterpolation : true,
         showArtist: key.data.showArtist !== undefined ? key.data.showArtist : true,
         showProgress: key.data.showProgress !== undefined ? key.data.showProgress : true,
         showTitle: key.data.showTitle !== undefined ? key.data.showTitle : true,
         showPlayPause: key.data.showPlayPause !== undefined ? key.data.showPlayPause : true,
-        showTimeInfo: key.data.showTimeInfo !== undefined ? key.data.showTimeInfo : true, // Preserve showTimeInfo
+        showTimeInfo: key.data.showTimeInfo !== undefined ? key.data.showTimeInfo : true,
         titleFontSize: key.data.titleFontSize || 18,
         artistFontSize: key.data.artistFontSize || 14,
-        timeFontSize: key.data.timeFontSize || 10, // Preserve timeFontSize from UI
-        // Preserve progressBarColor from incoming key data
+        timeFontSize: key.data.timeFontSize || 10,
         progressBarColor: progressBarColor,
-        // Interpolation state (reset on init)
         currentTrackDetails: null,
         lastApiUpdateTime: 0,
         progressAtLastUpdate: 0,
         durationMs: 0,
-        interpolationIntervalId: null, // Initialize as null
+        interpolationIntervalId: null,
     };
     
-    keyManager.keyData[keyUid] = key; // Store the fully initialized key data
+    keyManager.keyData[keyUid] = key;
 
-    // Style setup and initial loading image draw
     key.style = key.style || {};
     key.style.showIcon = false;
     key.style.showTitle = false;
     key.style.showEmoji = false;
     key.style.showImage = true;
-    
-    // Make sure progressBarColor is explicitly set in the style object
     key.style.progressBarColor = key.data.progressBarColor;
 
     try {
-        // Create a new style object with explicitly forced progressBarColor
         const renderStyle = {
             ...key.style,
-            progressBarColor: key.data.progressBarColor // Force progressBarColor
+            progressBarColor: key.data.progressBarColor
         };
         
         const loadingImage = await renderer.createSpotifyButtonDataUrl(
             key.width || 360, 'Loading...', 'Connecting...', false, null, 0, 0, 
-            renderStyle, // Use the explicit render style with progressBarColor
+            renderStyle,
             key.data.showProgress, key.data.showTitle, key.data.showPlayPause,
             key.data.titleFontSize, key.data.artistFontSize, 
-            key.data.showTimeInfo, key.data.timeFontSize // Pass the preserved timeFontSize
+            key.data.showTimeInfo, key.data.timeFontSize
         );
         keyManager.simpleDraw(serialNumber, key, loadingImage);
     } catch (error) {
@@ -390,8 +318,7 @@ async function initializeNowPlayingKey(serialNumber, key) {
         keyManager.textOnlyDraw(serialNumber, key, 'Error');
     }
 
-    // Fetch initial state AND start updates
-    await updateNowPlayingKey(serialNumber, key, true); // Pass flag to indicate it should start timers
+    await updateNowPlayingKey(serialNumber, key, true);
 }
 
 /** Start Periodic Updates (API Fetch and Interpolation) for Now Playing Key */
@@ -405,26 +332,19 @@ function startOrRestartNowPlayingUpdates(serialNumber, key) {
         return;
     }
 
-    // Read settings from the validated key data
     const { updateInterval, interpolationIntervalMs, enableInterpolation } = currentKeyData.data;
 
-    // --- Clear existing timers --- //
     if (keyManager.keyIntervals[keyId]) {
-        // ... (clearing API fetch timer - no change) ...
         logger.debug(`Clearing existing API fetch timer for ${keyId}`);
         clearInterval(keyManager.keyIntervals[keyId]);
         delete keyManager.keyIntervals[keyId];
     }
     if (currentKeyData.data.interpolationIntervalId) {
-        // ... (clearing Interpolation timer - no change) ...
          logger.debug(`Clearing existing interpolation timer for ${keyId}`);
         clearInterval(currentKeyData.data.interpolationIntervalId);
         currentKeyData.data.interpolationIntervalId = null;
     }
-    // --- End Clear existing timers --- //
 
-
-    // --- Start API Fetch Timer --- //
     logger.info(`Starting API fetch updates for key ${keyId} every ${updateInterval}ms.`);
     const apiFetchIntervalId = setInterval(async () => {
         const keyExists = keyManager.activeKeys[keyId] && keyManager.keyData[keyUid];
@@ -432,7 +352,6 @@ function startOrRestartNowPlayingUpdates(serialNumber, key) {
             logger.info(`Key ${keyId} no longer active/valid, clearing API fetch interval.`);
             clearInterval(apiFetchIntervalId);
             delete keyManager.keyIntervals[keyId];
-            // Also clear the interpolation timer if it exists (safety check)
             const latestKeyData = keyManager.keyData[keyUid];
             if (latestKeyData?.data?.interpolationIntervalId) {
                  logger.info(`Clearing orphaned interpolation interval for inactive key ${keyId}.`);
@@ -441,13 +360,10 @@ function startOrRestartNowPlayingUpdates(serialNumber, key) {
             }
             return;
         }
-        await updateNowPlayingKey(serialNumber, keyManager.keyData[keyUid], false); // Fetch only
+        await updateNowPlayingKey(serialNumber, keyManager.keyData[keyUid], false);
     }, updateInterval);
     keyManager.keyIntervals[keyId] = apiFetchIntervalId;
-    // --- End Start API Fetch Timer --- //
 
-
-    // --- Start Interpolation Timer (Conditionally) --- //
     if (enableInterpolation) {
         logger.info(`Starting UI interpolation updates for key ${keyId} every ${interpolationIntervalMs}ms.`);
         const interpolationIntervalId = setInterval(async () => {
@@ -455,7 +371,6 @@ function startOrRestartNowPlayingUpdates(serialNumber, key) {
             if (!keyExists) {
                 logger.info(`Key ${keyId} no longer active/valid, clearing interpolation interval.`);
                 clearInterval(interpolationIntervalId);
-                // Ensure the reference in key data is also cleared if cleanup didn't catch it
                 const latestKeyData = keyManager.keyData[keyUid];
                 if (latestKeyData?.data?.interpolationIntervalId === interpolationIntervalId) {
                     latestKeyData.data.interpolationIntervalId = null;
@@ -464,15 +379,12 @@ function startOrRestartNowPlayingUpdates(serialNumber, key) {
             }
             await renderInterpolatedNowPlaying(serialNumber, keyManager.keyData[keyUid]);
         }, interpolationIntervalMs);
-        // Store interpolation timer ID in key data
         currentKeyData.data.interpolationIntervalId = interpolationIntervalId;
     } else {
         logger.info(`UI interpolation disabled for key ${keyId}.`);
-        currentKeyData.data.interpolationIntervalId = null; // Ensure it's null if disabled
+        currentKeyData.data.interpolationIntervalId = null;
     }
-    // --- End Start Interpolation Timer --- //
 
-    // ADD Log: Indicate timer setup finished
     logger.info(`[startOrRestartNowPlayingUpdates] Key ${keyId} - Timer setup complete.`);
 }
 
@@ -489,11 +401,8 @@ async function updateNowPlayingKey(serialNumber, key, shouldStartTimers = false)
         return;
     }
 
-    // Update progressBarColor from incoming key data to ensure UI changes are reflected
     if (key.data?.progressBarColor && currentKeyData.data) {
         currentKeyData.data.progressBarColor = key.data.progressBarColor;
-        
-        // Also ensure style has the same progressBarColor
         if (!currentKeyData.style) currentKeyData.style = {};
         currentKeyData.style.progressBarColor = key.data.progressBarColor;
     }
@@ -542,7 +451,7 @@ async function updateNowPlayingKey(serialNumber, key, shouldStartTimers = false)
     if (trackId !== previousTrackId) {
         trackChanged = true;
         logger.info(`Track changed: ${trackId} (was ${previousTrackId})`);
-        currentPlaybackState.isLiked = null; // Reset while checking
+        currentPlaybackState.isLiked = null;
 
         if (isActive && trackId && trackId !== currentPlaybackState.lastCheckedTrackId) {
             logger.debug(`Checking liked status for new track: ${trackId}`);
@@ -553,12 +462,12 @@ async function updateNowPlayingKey(serialNumber, key, shouldStartTimers = false)
                     likedStatusChanged = true;
                 } else {
                     logger.warn(`Could not determine liked status for track ${trackId}`);
-                    currentPlaybackState.isLiked = null; // Ensure it's null if API fails
+                    currentPlaybackState.isLiked = null;
                 }
                 currentPlaybackState.lastCheckedTrackId = trackId;
             } catch (error) {
                 logger.error(`Error checking if track ${trackId} is saved: ${error.message}`);
-                currentPlaybackState.isLiked = null; // Ensure it's null on error
+                currentPlaybackState.isLiked = null;
             }
         } else if (!isActive) {
             logger.info("Playback stopped or became inactive.");
@@ -567,7 +476,6 @@ async function updateNowPlayingKey(serialNumber, key, shouldStartTimers = false)
         }
     }
 
-    // Re-fetch key data IN CASE IT CHANGED (e.g. UI update while waiting for API)
     currentKeyData = keyManager.keyData[keyUid];
     if (!currentKeyData || !currentKeyData.data) {
         logger.error(`Key data for ${keyUid} disappeared during update processing.`);
@@ -575,29 +483,22 @@ async function updateNowPlayingKey(serialNumber, key, shouldStartTimers = false)
         return;
     }
 
-    // Update Key-Specific Data for Interpolation
     currentKeyData.data.currentTrackDetails = currentTrack;
     currentKeyData.data.lastApiUpdateTime = now;
     currentKeyData.data.progressAtLastUpdate = progressMs;
     currentKeyData.data.durationMs = durationMs;
     
-    // ENSURE progressBarColor doesn't get lost after backend API update
-    // Re-ensure progressBarColor is still set correctly after the update
     if (key.data?.progressBarColor) {
         currentKeyData.data.progressBarColor = key.data.progressBarColor;
-        
-        // Re-ensure style also has the correct progressBarColor
         if (!currentKeyData.style) currentKeyData.style = {};
         currentKeyData.style.progressBarColor = key.data.progressBarColor;
     }
 
-    // Start or restart timers if needed
     if (shouldStartTimers) {
         startOrRestartNowPlayingUpdates(serialNumber, currentKeyData);
         await renderInterpolatedNowPlaying(serialNumber, currentKeyData);
     }
 
-    // Trigger Update for Like Keys if needed
     if (trackChanged || likedStatusChanged) {
         logger.debug(`Track or liked status change detected. Updating relevant like keys.`);
         Object.keys(keyManager.activeKeys).forEach(activeKeyId => {
@@ -622,7 +523,6 @@ async function initializeLikeKey(serialNumber, key) {
     const keyId = `${serialNumber}-${keyUid}`;
     logger.info('Initializing like key:', keyId);
 
-    // Initialize data and store in keyManager
     key.data = {
         likedColor: key.data?.likedColor || '#1DB954',
         unlikedColor: key.data?.unlikedColor || '#FFFFFF',
@@ -630,10 +530,9 @@ async function initializeLikeKey(serialNumber, key) {
         isLiked: currentPlaybackState.isLiked,
         currentTrackId: currentPlaybackState.trackId
     };
-    keyManager.keyData[keyUid] = key; // Store initialized data
-    keyManager.activeKeys[keyId] = true; // Mark as active
+    keyManager.keyData[keyUid] = key;
+    keyManager.activeKeys[keyId] = true;
 
-    // Initial draw
     updateLikeKeyDisplay(serialNumber, key);
 }
 
@@ -645,36 +544,34 @@ async function updateLikeKeyDisplay(serialNumber, key) {
 
     if (!keyManager.activeKeys[keyId]) {
         logger.warn(`Attempted to update inactive like key ${keyId}.`);
-        // No interval to clear, just return
         return;
     }
 
-    // Retrieve the latest key data (important as it might have been updated)
     const currentKeyData = keyManager.keyData[keyUid];
     if (!currentKeyData || !currentKeyData.data) {
         logger.error(`Key data or key.data missing for like key ${keyUid} during display update.`);
-        return; // Cannot proceed
+        return;
     }
 
     const { isLiked, likedColor, unlikedColor, likeBgColor } = currentKeyData.data;
     
     try {
         const buttonDataUrl = await renderer.createSpotifyButtonDataUrl(
-            currentKeyData.width || 80, // Like button specific default width
-            null, // trackName (always null now)
-            null, // artistName (always null)
-            null, // isPlaying (not used)
-            null, // albumArtUrl (not used)
-            0,    // progress (not used)
-            0,    // duration (not used)
+            currentKeyData.width || 80,
+            null,
+            null,
+            null,
+            null,
+            0,
+            0,
             currentKeyData.style || {},
-            false, // showProgress
-            false, // showTitle
-            false, // showPlayPause
-            0,     // titleFontSize
-            0,     // artistFontSize
-            false, // showTimeInfo
-            0,     // timeFontSize
+            false,
+            false,
+            false,
+            0,
+            0,
+            false,
+            0,
             {
                 buttonType: 'like',
                 isLiked: isLiked,
@@ -686,8 +583,8 @@ async function updateLikeKeyDisplay(serialNumber, key) {
         keyManager.simpleDraw(serialNumber, currentKeyData, buttonDataUrl);
     } catch (error) {
         logger.error(`Error rendering like key ${keyId}: ${error.message}`);
-        const errorText = isLiked === null ? '?' : (isLiked ? '♥' : '♡'); // Simplified error text
-        keyManager.textOnlyDraw(serialNumber, currentKeyData, errorText); // Fallback text
+        const errorText = isLiked === null ? '?' : (isLiked ? '♥' : '♡');
+        keyManager.textOnlyDraw(serialNumber, currentKeyData, errorText);
     }
 }
 
@@ -697,25 +594,22 @@ async function handleLikeInteraction(serialNumber, key, data) {
     const keyId = `${serialNumber}-${keyUid}`;
     logger.info(`Handling like interaction for key ${keyId}`);
 
-    // Retrieve the latest key data
     const currentKeyData = keyManager.keyData[keyUid];
     if (!currentKeyData || !currentKeyData.data) {
         logger.error(`Key data or key.data missing for like key ${keyUid} during interaction.`);
-        return; // Cannot proceed
+        return;
     }
 
     const { currentTrackId, isLiked } = currentKeyData.data;
 
     if (!currentTrackId) {
         logger.warn(`Like button pressed (${keyId}) but no current track ID is known.`);
-        // Optional: Provide visual feedback for error? (e.g., flash red)
-        return; // No track to like/unlike
+        return;
     }
 
     if (isLiked === null) {
          logger.warn(`Like button pressed (${keyId}) but liked status is unknown.`);
-         // Optional: Trigger a check? Or just wait for next update cycle.
-         return; // Don't perform action if status is uncertain
+         return;
     }
 
     try {
@@ -729,30 +623,25 @@ async function handleLikeInteraction(serialNumber, key, data) {
             await spotifyApi.removeTracks([currentTrackId]);
             logger.info(`Successfully removed track ${currentTrackId}`);
             currentKeyData.data.isLiked = false;
-            currentPlaybackState.isLiked = false; // Update global state too
+            currentPlaybackState.isLiked = false;
         } else {
             logger.info(`Attempting to add track ${currentTrackId} to library (key: ${keyId})`);
             await spotifyApi.saveTracks([currentTrackId]);
             logger.info(`Successfully saved track ${currentTrackId}`);
             currentKeyData.data.isLiked = true;
-            currentPlaybackState.isLiked = true; // Update global state too
+            currentPlaybackState.isLiked = true;
         }
 
-        // Update display immediately after successful action
         await updateLikeKeyDisplay(serialNumber, currentKeyData);
 
     } catch (error) {
         logger.error(`Failed to ${isLiked ? 'remove' : 'save'} track ${currentTrackId}: ${error.message}`);
-        // Optional: Provide visual feedback for the error on the key
-        // Revert optimistic update if needed (though check might fix it later)
-        // currentKeyData.data.isLiked = isLiked; // Revert if failed?
     }
 }
 
 /** Initialize Counter Key */
 function initializeCounterKey(serialNumber, key) {
      const keyUid = key.uid;
-     // Use keyManager state and function
      keyManager.keyData[keyUid] = key; 
      keyManager.keyData[keyUid].counter = parseInt(key.data?.rangeMin || '0');
      key.style = key.style || {};
@@ -766,9 +655,7 @@ function initializeCounterKey(serialNumber, key) {
 async function handleNowPlayingInteraction(serialNumber, key, data) {
     const keyUid = key.uid;
     const keyId = `${serialNumber}-${keyUid}`;
-     // logger.info(`Handling interaction for nowplaying key ${keyId}`);
 
-     // Use keyManager state
      if (!keyManager.keyData[keyUid]) keyManager.keyData[keyUid] = {};
      Object.assign(keyManager.keyData[keyUid], key);
      const currentKeyData = keyManager.keyData[keyUid];
@@ -780,31 +667,29 @@ async function handleNowPlayingInteraction(serialNumber, key, data) {
     currentKeyData.style.showImage = true;
     
     if (data.evt === 'click') { 
-        try {
-            if (!spotifyAuth.getAuthenticationStatus()) {
-                logger.error(`Cannot toggle play/pause for ${keyId}: Not auth.`);
-                const authErrImg = await renderer.createSpotifyButtonDataUrl(/* Auth Error Params */);
-                keyManager.simpleDraw(serialNumber, currentKeyData, authErrImg); // Use keyManager
-                return;
-            }
-            const playback = await spotifyApi.getCurrentPlayback();
-            const isCurrentlyPlaying = playback?.is_playing || false;
-            await controlSpotify(isCurrentlyPlaying ? 'pause' : 'play');
+        // try {
+        //     if (!spotifyAuth.getAuthenticationStatus()) {
+        //         logger.error(`Cannot toggle play/pause for ${keyId}: Not auth.`);
+        //         const authErrImg = await renderer.createSpotifyButtonDataUrl(/* Auth Error Params */);
+        //         keyManager.simpleDraw(serialNumber, currentKeyData, authErrImg);
+        //         return;
+        //     }
+        //     const playback = await spotifyApi.getCurrentPlayback();
+        //     const isCurrentlyPlaying = playback?.is_playing || false;
+        //     await controlSpotify(isCurrentlyPlaying ? 'pause' : 'play');
             
-            // Force update after interaction
-            await new Promise(resolve => setTimeout(resolve, 250));
-            await updateNowPlayingKey(serialNumber, currentKeyData); 
+        //     await new Promise(resolve => setTimeout(resolve, 250));
+        //     await updateNowPlayingKey(serialNumber, currentKeyData); 
 
-            // Use keyManager state to check/restart interval
-            if (!keyManager.keyIntervals[keyId]) {
-                 logger.info(`Restarting update interval for ${keyId} after interaction.`);
-                 startOrRestartNowPlayingUpdates(serialNumber, currentKeyData);
-             }
-        } catch (error) {
-            logger.error(`Error handling play/pause click for ${keyId}:`, error);
-            const errorImage = await renderer.createSpotifyButtonDataUrl(/* Error Params */);
-            keyManager.simpleDraw(serialNumber, currentKeyData, errorImage); // Use keyManager
-        }
+        //     if (!keyManager.keyIntervals[keyId]) {
+        //          logger.info(`Restarting update interval for ${keyId} after interaction.`);
+        //          startOrRestartNowPlayingUpdates(serialNumber, currentKeyData);
+        //      }
+        // } catch (error) {
+        //     logger.error(`Error handling play/pause click for ${keyId}:`, error);
+        //     const errorImage = await renderer.createSpotifyButtonDataUrl(/* Error Params */);
+        //     keyManager.simpleDraw(serialNumber, currentKeyData, errorImage);
+        // }
     } else { 
          await updateNowPlayingKey(serialNumber, currentKeyData); 
     }
@@ -813,7 +698,6 @@ async function handleNowPlayingInteraction(serialNumber, key, data) {
 /** Handle Interaction for Counter Key */
 function handleCounterInteraction(serialNumber, key, data) {
     const keyUid = key.uid;
-    // Use keyManager state
      if (!keyManager.keyData[keyUid]) { initializeCounterKey(serialNumber, key); }
      else { Object.assign(keyManager.keyData[keyUid], key); }
      const currentKeyData = keyManager.keyData[keyUid];
@@ -827,13 +711,18 @@ function handleCounterInteraction(serialNumber, key, data) {
         currentKeyData.counter = counter;
         currentKeyData.title = `Count: ${counter}`;
         
-        // Use keyManager function
         keyManager.simpleTextDraw(serialNumber, currentKeyData); 
     } 
 }
 
 // --- Plugin Start & Global Handlers --- //
 plugin.start()
-process.on('uncaughtException', (error) => { /* ... */ });
-process.on('unhandledRejection', (reason, promise) => { /* ... */ });
-plugin.on('ready', async () => { /* Original */ });
+process.on('uncaughtException', (error) => { 
+    logger.error('Uncaught exception:', error);
+});
+process.on('unhandledRejection', (reason, promise) => { 
+    logger.error('Unhandled rejection:', reason);
+});
+plugin.on('ready', async () => { 
+    logger.info('Plugin ready');
+});

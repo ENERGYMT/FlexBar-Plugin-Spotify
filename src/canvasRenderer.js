@@ -536,6 +536,39 @@ async function createModernNowPlayingCanvas(config) {
         // Decode HTML entities in track name and artist name
         const decodedTrackName = decodeHtmlEntities(trackName);
         const decodedArtistName = decodeHtmlEntities(artistName);
+        
+        // Helper function to format time for both pre-calculation and display
+        function formatTime(milliseconds) {
+            if (!milliseconds || isNaN(milliseconds)) return '0:00';
+            
+            const totalSeconds = Math.floor(milliseconds / 1000);
+            const minutes = Math.floor(totalSeconds / 60);
+            const seconds = totalSeconds % 60;
+            return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+        
+        // Calculate time text width for overlap prevention if time info is shown
+        let timeTextWidth = 0;
+        if (showTimeInfo && duration > 0) {
+            ctx.save();
+            // Ensure timeFontSize is a number (might be a string from UI)
+            let parsedTimeFontSize = timeFontSize;
+            if (typeof timeFontSize === 'string') {
+                parsedTimeFontSize = parseInt(timeFontSize, 10);
+            }
+            const finalTimeFontSize = Math.max(8, Math.min(24, parsedTimeFontSize || 10));
+            ctx.font = `${finalTimeFontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
+            
+            // Pre-calculate time text width to reserve space
+            const currentTime = formatTime(progress);
+            const totalTime = formatTime(duration);
+            const timeText = `${currentTime} / ${totalTime}`;
+            timeTextWidth = ctx.measureText(timeText).width + padding * 2;
+            ctx.restore();
+        }
+        
+        // Adjust availableTextWidth to account for time information
+        const adjustedAvailableTextWidth = availableTextWidth - (showTimeInfo ? timeTextWidth : 0);
 
         if (showTitle && decodedTrackName && availableTextWidth > 10) {
             ctx.save();
@@ -545,7 +578,8 @@ async function createModernNowPlayingCanvas(config) {
             ctx.shadowOffsetY = 1;
             ctx.font = `600 ${finalTitleFontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
             ctx.fillStyle = '#FFFFFF';
-            let displayTrackName = truncateText(ctx, decodedTrackName, availableTextWidth); // Uses util
+            // Use the adjusted width for track name to avoid overlap with time
+            let displayTrackName = truncateText(ctx, decodedTrackName, adjustedAvailableTextWidth);
             ctx.fillText(displayTrackName, textX, titleY);
             ctx.restore();
         }
@@ -558,23 +592,14 @@ async function createModernNowPlayingCanvas(config) {
             ctx.shadowOffsetY = 1;
             ctx.font = `500 ${finalArtistFontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
             ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-            let displayArtistName = truncateText(ctx, decodedArtistName, availableTextWidth); // Uses util
+            // Use the adjusted width for artist name to avoid overlap with time
+            let displayArtistName = truncateText(ctx, decodedArtistName, adjustedAvailableTextWidth);
             ctx.fillText(displayArtistName, textX, artistY);
             ctx.restore();
         }
         
         // Time Information
         if (showTimeInfo && duration > 0) {
-            // Helper function to format time
-            function formatTime(milliseconds) {
-                if (!milliseconds || isNaN(milliseconds)) return '0:00';
-                
-                const totalSeconds = Math.floor(milliseconds / 1000);
-                const minutes = Math.floor(totalSeconds / 60);
-                const seconds = totalSeconds % 60;
-                return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-            }
-            
             const currentTime = formatTime(progress);
             const totalTime = formatTime(duration);
             const timeText = `${currentTime} / ${totalTime}`;

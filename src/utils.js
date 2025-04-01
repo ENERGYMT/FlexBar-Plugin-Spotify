@@ -70,7 +70,7 @@ function createFallbackImage(width, height = 60) {
         // Add basic validation for width and height
         if (typeof width !== 'number' || width <= 0 || typeof height !== 'number' || height <= 0) {
             logger.error(`Invalid dimensions for fallback image: ${width}x${height}`);
-            return ''; // Return empty string or a default placeholder?
+            return ''; 
         }
         
         const canvas = createCanvas(width, height);
@@ -83,7 +83,7 @@ function createFallbackImage(width, height = 60) {
         ctx.font = '14px sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('Error', width/2, height/2); // Changed text to 'Error'
+        ctx.fillText('Error', width/2, height/2);
         
         return canvas.toDataURL('image/png');
     } catch (error) {
@@ -168,13 +168,11 @@ function escapeXml(unsafe) {
  * Helper function to draw a rounded rectangle
  */
 function roundedRect(ctx, x, y, width, height, radius) {
-     // Add input validation
     if (typeof x !== 'number' || typeof y !== 'number' || typeof width !== 'number' || typeof height !== 'number' || typeof radius !== 'number') {
         logger.error('Invalid arguments provided to roundedRect');
-        return; // Stop execution if inputs are invalid
+        return; 
     }
     
-    // Ensure radius is not larger than half the shortest side
     radius = Math.max(0, Math.min(radius, width / 2, height / 2));
 
     try {
@@ -185,13 +183,8 @@ function roundedRect(ctx, x, y, width, height, radius) {
         ctx.arcTo(x, y + height, x, y, radius);
         ctx.arcTo(x, y, x + width, y, radius);
         ctx.closePath();
-        // Decision: Should this function also fill/stroke? 
-        // Keeping it simple: only creates the path. The caller decides to fill or stroke.
-        // If fill is always intended, add ctx.fill() here. Let's assume caller handles fill/stroke.
     } catch (error) {
         logger.error(`Error drawing rounded rectangle: ${error.message}`);
-        // Optionally draw a regular rectangle as fallback?
-        // ctx.rect(x, y, width, height); // Fallback to sharp corners
     }
 }
 
