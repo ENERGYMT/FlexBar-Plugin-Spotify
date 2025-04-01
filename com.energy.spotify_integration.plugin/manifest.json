@@ -49,7 +49,7 @@
                 },
                 "style": {
                     "icon": "mdi mdi-music-note",
-                    "width": 240
+                    "width": 480
                 },
                 "data": {
                     "updateInterval": 5000,
@@ -70,7 +70,7 @@
                 },
                 "style": {
                     "icon": "mdi mdi-heart",
-                    "width": 240
+                    "width": 120
                 },
                 "data": {}
             }

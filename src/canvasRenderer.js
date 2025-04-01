@@ -1,4 +1,5 @@
-const { createCanvas, loadImage } = require('@napi-rs/canvas');
+const { Canvas, loadImage } = require('skia-canvas');
+const createCanvas = (width, height) => new Canvas(width, height);
 const { truncateText, getImageColors, roundedRect, createFallbackImage, decodeHtmlEntities } = require('./utils'); // Import necessary utils
 const spotifyAuth = require('./spotifyAuth');
 const spotifyApi = require('./spotifyApi');

@@ -24,7 +24,7 @@
   },
   "dependencies": {
     "@eniac/flexdesigner": "^1.0.1",
-    "@napi-rs/canvas": "^0.1.68",
-    "open": "^10.1.0"
+    "open": "^10.1.0",
+    "skia-canvas": "^2.0.2"
   }
 }
