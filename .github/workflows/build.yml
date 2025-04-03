@@ -33,14 +33,20 @@ jobs:
     - name: Build plugin
       run: npm run build
       
-    - name: Test plugin
+    - name: Pack plugin
       run: npm run plugin:pack
+      
+    - name: Rename plugin for platform
+      shell: bash
+      run: |
+        PLATFORM=${{ matrix.os }}
+        mv com.energy.spotify_integration.flexplugin "com.energy.spotify_integration-${PLATFORM}.flexplugin"
       
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: com.energy.spotify_integration-${{ matrix.os }}
-        path: com.energy.spotify_integration.flexplugin
+        name: plugin-${{ matrix.os }}
+        path: com.energy.spotify_integration-*.flexplugin
         compression-level: 0
 
   release:
@@ -60,13 +66,13 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         path: ./artifacts
-        pattern: com.energy.spotify_integration-*
+        merge-multiple: true
 
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
         files: |
-          artifacts/com.energy.spotify_integration-*
+          artifacts/*.flexplugin
         draft: false
         prerelease: false
         generate_release_notes: true 
