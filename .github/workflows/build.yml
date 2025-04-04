@@ -39,7 +39,11 @@ jobs:
     - name: Rename plugin for platform
       shell: bash
       run: |
-        TAG=${GITHUB_REF#refs/tags/}
+        if [[ $GITHUB_REF == refs/tags/* ]]; then
+          TAG=${GITHUB_REF#refs/tags/}
+        else
+          TAG=latest
+        fi
         PLATFORM=${{ matrix.os }}
         # Clean up platform name
         case $PLATFORM in
