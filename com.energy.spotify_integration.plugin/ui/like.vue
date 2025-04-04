@@ -30,9 +30,8 @@
                   </template>
                   <v-color-picker 
                     v-model="modelValue.data.likedColor" 
-                    hide-inputs 
                     elevation="10"
-                    modes="['hex']"
+                    :modes="['hex']"
                     mode="hex"
                   ></v-color-picker>
                 </v-menu>
@@ -58,9 +57,8 @@
                   </template>
                   <v-color-picker 
                     v-model="modelValue.data.unlikedColor" 
-                    hide-inputs 
                     elevation="10"
-                    modes="['hex']"
+                    :modes="['hex']"
                     mode="hex"
                   ></v-color-picker>
                 </v-menu>
@@ -86,9 +84,8 @@
                   </template>
                   <v-color-picker 
                     v-model="modelValue.data.likeBgColor" 
-                    hide-inputs 
                     elevation="10"
-                    modes="['hex']"
+                    :modes="['hex']"
                     mode="hex"
                   ></v-color-picker>
                 </v-menu>
@@ -104,7 +101,7 @@
 <script>
 const DEFAULT_MODEL_VALUE = {
   data: {
-    likedColor: '#1DB954',    // Default Spotify green
+    likedColor: '#1ED760',    // Default Spotify green
     unlikedColor: '#FFFFFF',  // Default white
     likeBgColor: '#424242'    // Default background color
   },

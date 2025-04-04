@@ -103,9 +103,8 @@
                   </template>
                   <v-color-picker 
                     v-model="modelValue.data.progressBarColor" 
-                    hide-inputs 
                     elevation="10"
-                    modes="['hex']"
+                    :modes="['hex']"
                     mode="hex"
                     @update:model-value="updateProgressBarColor"
                   ></v-color-picker>
@@ -170,7 +169,7 @@ const DEFAULT_MODEL_VALUE = {
     titleFontSize: 18, // Default title font size
     artistFontSize: 14, // Default artist font size
     timeFontSize: 14, // Default time font size
-    progressBarColor: '#1DB954' // Default progress bar color (Spotify green)
+    progressBarColor: '#1ED760' // Default progress bar color (Spotify green)
   },
   title: 'No track playing'
 };
@@ -200,7 +199,7 @@ export default {
       
       // Ensure progressBarColor is properly synced between data and style
       if (!this.modelValue.data.progressBarColor) {
-        this.modelValue.data.progressBarColor = '#1DB954';
+        this.modelValue.data.progressBarColor = '#1ED760';
       }
       this.modelValue.style.progressBarColor = this.modelValue.data.progressBarColor;
       
@@ -253,7 +252,7 @@ export default {
     updateProgressBarColor(value) {
       const isValidHex = /^#([0-9A-F]{3}){1,2}$/i.test(value);
       if (!isValidHex) {
-        this.modelValue.data.progressBarColor = '#1DB954';
+        this.modelValue.data.progressBarColor = '#1ED760';
       }
       if (!this.modelValue.style) this.modelValue.style = {};
       this.modelValue.style.progressBarColor = this.modelValue.data.progressBarColor;

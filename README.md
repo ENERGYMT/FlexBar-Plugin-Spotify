@@ -63,7 +63,7 @@ npm run dev
 Create a production-ready plugin package:
 ```bash
 npm run build
-npm run plugin:pack --path com.eniac.example.plugin
+npm run plugin:pack
 ```
 
 ## 🔐 Authentication

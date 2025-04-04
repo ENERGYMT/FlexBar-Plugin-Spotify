@@ -358,7 +358,7 @@ async function initializeNowPlayingKey(serialNumber, key) {
     logger.info('Initializing nowplaying key:', keyId);
 
     key.data = key.data || {};
-    const progressBarColor = key.data.progressBarColor || '#1DB954';
+    const progressBarColor = key.data.progressBarColor || '#1ED760';
 
     key.data = {
         updateInterval: key.data.updateInterval || 4000,
@@ -633,7 +633,7 @@ async function initializeLikeKey(serialNumber, key) {
     logger.info('Initializing like key:', keyId);
 
     key.data = {
-        likedColor: key.data?.likedColor || '#1DB954',
+        likedColor: key.data?.likedColor || '#1ED760',
         unlikedColor: key.data?.unlikedColor || '#FFFFFF',
         likeBgColor: key.data?.likeBgColor || '#424242',
         isLiked: currentPlaybackState.isLiked,

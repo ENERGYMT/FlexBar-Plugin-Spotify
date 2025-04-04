@@ -39,8 +39,15 @@ jobs:
     - name: Rename plugin for platform
       shell: bash
       run: |
+        TAG=${GITHUB_REF#refs/tags/}
         PLATFORM=${{ matrix.os }}
-        mv com.energy.spotify_integration.flexplugin "com.energy.spotify_integration-${PLATFORM}.flexplugin"
+        # Clean up platform name
+        case $PLATFORM in
+          "windows-latest") CLEAN_PLATFORM="windows" ;;
+          "macos-latest") CLEAN_PLATFORM="macos" ;;
+          "ubuntu-latest") CLEAN_PLATFORM="linux" ;;
+        esac
+        mv com.energy.spotify_integration.flexplugin "com.energy.spotify_integration-${CLEAN_PLATFORM}-${TAG}.flexplugin"
       
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
