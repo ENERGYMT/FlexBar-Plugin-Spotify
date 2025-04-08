@@ -176,7 +176,7 @@ function _handlePluginData(payload) {
     logger.info(`Received plugin.data for key ${key} (handler).`);
     
     if (key.cid === "com.energy.spotify_integration.nowplaying") {
-        handleNowPlayingInteraction(serialNumber, key, data);
+        // handleNowPlayingInteraction(serialNumber, key, data);
         return { status: "success", message: "Handled now playing interaction." };
     } else if (key.cid === "com.energy.spotify_integration.like") {
         handleLikeInteraction(serialNumber, key, data);

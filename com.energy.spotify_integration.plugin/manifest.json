@@ -41,7 +41,7 @@
                 "cid": "com.energy.spotify_integration.nowplaying",
                 "config": {
                     "keyType": "default",
-                    "clickable": true,
+                    "clickable": false,
                     "platform": [
                         "windows",
                         "mac"
