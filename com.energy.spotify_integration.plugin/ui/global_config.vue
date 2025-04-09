@@ -59,7 +59,7 @@
                     density="compact"
                     hide-details="auto"
                     class="mb-3"
-                    placeholder="http://localhost:8888/callback"
+                    placeholder="http://127.0.0.1:8888/callback"
                     :disabled="isAuthenticated"
                 ></v-text-field>
                 
@@ -214,7 +214,7 @@ export default {
                 
                 // Set default redirect URI if not already set
                 if (!this.modelValue.config.redirectUri) {
-                    this.modelValue.config.redirectUri = "http://localhost:8888/callback";
+                    this.modelValue.config.redirectUri = "http://127.0.0.1:8888/callback";
                 }
                 
                 return true;

@@ -83,7 +83,7 @@ The plugin requires Spotify authentication to function properly.
      - App name: "FlexBar Spotify Integration" (or your preferred name)
      - App description: Brief description of your app
      - Website: Can be left blank for development
-     - Redirect URI: `http://localhost:8888/callback`
+     - Redirect URI: `http://127.0.0.1:8888/callback`
      - Bundle ID: Can be left blank for development
 
 3. **Get Your Credentials**
@@ -96,7 +96,7 @@ The plugin requires Spotify authentication to function properly.
    - Enter your Spotify credentials:
      - Client ID: Your app's Client ID
      - Client Secret: Your app's Client Secret
-     - Redirect URI: `http://localhost:8888/callback`
+     - Redirect URI: `http://127.0.0.1:8888/callback`
    - Click "Save"
    - Click "Connect" to start the authentication process
 

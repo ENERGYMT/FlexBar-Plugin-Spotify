@@ -1,7 +1,7 @@
 {
     "name": "Spotify Integration",
     "uuid": "com.energy.spotify_integration",
-    "version": "1.0.0",
+    "version": "1.0.4",
     "author": "ENERGY",
     "entry": "backend/plugin.cjs",
     "description": "Spotify Integration for FlexBar",
