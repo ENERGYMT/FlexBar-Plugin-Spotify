@@ -1,5 +1,5 @@
 <template>
-    <v-container>
+    <v-container class="scrollable-config-container">
         <!-- Notification snackbars -->
         <v-snackbar
             v-model="notifications.save.show"
@@ -100,7 +100,48 @@
                     class="ml-2"
                     :disabled="isInitializing"
                 >
-                    Save
+                    Save API Settings
+                </v-btn>
+            </v-card-actions>
+        </v-card>
+
+        <!-- Logging Configuration Card -->
+        <v-card elevation="2" class="mb-4 rounded-lg">
+            <v-card-item prepend-icon="mdi-math-log">
+                <v-card-title>Logging Configuration</v-card-title>
+                <v-card-subtitle>Adjust plugin log verbosity</v-card-subtitle>
+            </v-card-item>
+            <v-divider></v-divider>
+            <v-card-text>
+                <v-select
+                    v-model="modelValue.config.logLevel"
+                    :items="logLevelOptions"
+                    item-title="title"
+                    item-value="value"
+                    label="Log Level"
+                    outlined
+                    density="compact"
+                    hide-details="auto"
+                    class="mb-3"
+                ></v-select>
+                <v-alert
+                    density="compact"
+                    type="info"
+                    variant="tonal"
+                    icon="mdi-information-outline"
+                    text="Changes to log level will apply after saving. The backend logger updates based on this saved setting."
+                ></v-alert>
+            </v-card-text>
+            <v-card-actions class="pa-3">
+                <v-spacer></v-spacer>
+                <v-btn 
+                    variant="tonal" 
+                    @click="saveConfig" 
+                    prepend-icon="mdi-content-save-outline"
+                    class="ml-2"
+                    :disabled="isInitializing"
+                >
+                    Save Log Settings
                 </v-btn>
             </v-card-actions>
         </v-card>
@@ -122,7 +163,7 @@ export default {
             notifications: {
                 save: {
                     show: false,
-                    message: "Spotify settings have been saved successfully"
+                    message: "Settings have been saved successfully" // Generic message
                 },
                 auth: {
                     show: false,
@@ -130,62 +171,78 @@ export default {
                     color: "info",
                     icon: "mdi-information"
                 }
-            }
+            },
+            logLevelOptions: [ // These must match LOG_LEVELS keys in loggerWrapper.js
+                { title: 'Off', value: 'OFF' },
+                { title: 'Error', value: 'ERROR' },
+                { title: 'Warn', value: 'WARN' },
+                { title: 'Info', value: 'INFO' },
+                { title: 'Debug', value: 'DEBUG' },
+            ],
         };
     },
     computed: {
         canAuthenticate() {
-            return this.modelValue.config.clientId && 
+            return this.modelValue.config && // Ensure config exists
+                   this.modelValue.config.clientId && 
                    this.modelValue.config.clientSecret && 
                    this.modelValue.config.redirectUri;
         }
     },
     watch: {
         'modelValue.config': {
-            handler: function(newConfig) {
+            handler: function(newConfig, oldConfig) {
                 if (this.isInitializing) return;
                 
-                this.$fd.info('Config changed:', newConfig);
-                this.checkAuthStatus();
+                this.$fd.info('Config changed in watcher:', JSON.parse(JSON.stringify(newConfig)));
+                // Only call checkAuthStatus if relevant parts of config changed or if it's the initial call
+                if (!oldConfig || 
+                    (newConfig.isAuthenticated !== oldConfig.isAuthenticated ||
+                     newConfig.accessToken !== oldConfig.accessToken ||
+                     newConfig.refreshToken !== oldConfig.refreshToken)) {
+                    this.checkAuthStatus();
+                }
             },
             deep: true,
-            immediate: true
+            immediate: true // Keep immediate to run checkAuthStatus on load via watcher
         }
     },
     methods: {
         async saveConfig() {
-            this.$fd.info('Saving config:', this.modelValue.config);
+            this.$fd.info('Saving config with modelValue.config:', JSON.parse(JSON.stringify(this.modelValue.config)));
             
             try {
-                // First get the current config to make sure we don't override tokens
-                const currentConfig = await this.$fd.getConfig();
+                // First get the current config to make sure we don't override tokens or other settings
+                const currentFullConfig = await this.$fd.getConfig() || {};
                 
-                // Preserve important authentication data
+                // Merge our current UI model (which now includes logLevel) with the full config
                 const updatedConfig = {
-                    ...currentConfig,
-                    // Only update fields that should be controlled by the UI
-                    clientId: this.modelValue.config.clientId,
-                    clientSecret: this.modelValue.config.clientSecret,
-                    redirectUri: this.modelValue.config.redirectUri,
-                    isAuthenticated: this.modelValue.config.isAuthenticated
+                    ...currentFullConfig, // Base with all existing settings
+                    ...this.modelValue.config, // Apply UI changes (clientId, clientSecret, redirectUri, logLevel, isAuthenticated)
                 };
                 
-                // Make sure we don't accidentally clear tokens
-                if (this.modelValue.config.accessToken) {
+                // Ensure critical auth data from modelValue is preserved if it was part of it
+                // This logic might be redundant if modelValue.config is already comprehensive
+                // but it's safer.
+                if (this.modelValue.config.hasOwnProperty('accessToken')) {
                     updatedConfig.accessToken = this.modelValue.config.accessToken;
                 }
-                
-                if (this.modelValue.config.refreshToken) {
+                if (this.modelValue.config.hasOwnProperty('refreshToken')) {
                     updatedConfig.refreshToken = this.modelValue.config.refreshToken;
                 }
-                
-                // Save the merged config
+                if (this.modelValue.config.hasOwnProperty('isAuthenticated')) {
+                    updatedConfig.isAuthenticated = this.modelValue.config.isAuthenticated;
+                }
+
+
+                this.$fd.info('Final config to save:', JSON.parse(JSON.stringify(updatedConfig)));
                 await this.$fd.setConfig(updatedConfig);
                 
-                // Update the local model with the full config
-                this.modelValue.config = updatedConfig;
+                // Update the local model with the successfully saved (and potentially merged) config
+                // This ensures the UI model is consistent with what's stored.
+                this.modelValue.config = { ...updatedConfig };
                 
-                // Show save confirmation
+                this.notifications.save.message = "Settings saved successfully";
                 this.notifications.save.show = true;
             } catch (error) {
                 this.$fd.error('Failed to save config:', error);
@@ -196,34 +253,53 @@ export default {
             }
         },
         async initializeConfig() {
-            // Set flag to prevent watcher from triggering recursively
             this.isInitializing = true;
+            this.$fd.info('initializeConfig started. Current modelValue.config:', JSON.parse(JSON.stringify(this.modelValue.config)));
             
             try {
-                // get config from local file
-                const config = await this.$fd.getConfig();
+                const loadedConfig = await this.$fd.getConfig();
+                this.$fd.info('Loaded config from $fd.getConfig():', JSON.parse(JSON.stringify(loadedConfig)));
+
+                let newConfig = {
+                    redirectUri: "http://127.0.0.1:8888/callback", // Default
+                    logLevel: 'INFO', // Default log level
+                    isAuthenticated: false, // Default auth state
+                    clientId: '',
+                    clientSecret: '',
+                    accessToken: null,
+                    refreshToken: null,
+                    ...(loadedConfig || {}), // Override defaults with loaded config if it exists
+                };
                 
-                // Merge with existing config
-                if (config) {
-                    this.modelValue.config = config;
-                } else if (!this.modelValue.config) {
-                    this.modelValue.config = {};
+                // If redirectUri was loaded but is empty/null, re-apply default (should be covered by spread)
+                if (!newConfig.redirectUri) {
+                     newConfig.redirectUri = "http://127.0.0.1:8888/callback";
                 }
-                
-                this.$fd.info('initializeConfig', this.modelValue.config);
-                
-                // Set default redirect URI if not already set
-                if (!this.modelValue.config.redirectUri) {
-                    this.modelValue.config.redirectUri = "http://127.0.0.1:8888/callback";
+                if (!newConfig.logLevel) { // Ensure logLevel has a value
+                    newConfig.logLevel = 'INFO';
                 }
+
+                this.modelValue.config = newConfig;
                 
+                this.$fd.info('initializeConfig - final modelValue.config after merging:', JSON.parse(JSON.stringify(this.modelValue.config)));
                 return true;
             } catch (error) {
                 this.$fd.error('Failed to initialize config:', error);
+                 // Ensure modelValue.config is an object to prevent errors with subsequent property access
+                if (!this.modelValue.config) {
+                    this.modelValue.config = {};
+                }
+                // Set a default logLevel on error too, so UI doesn't break if other parts fail
+                if (typeof this.modelValue.config.logLevel === 'undefined') {
+                    this.modelValue.config.logLevel = 'INFO';
+                }
                 return false;
             } finally {
-                // Reset flag when done
                 this.isInitializing = false;
+                // Ensure reactivity after potential object replacement
+                // This forces Vue to recognize changes if the object reference of modelValue.config changed
+                this.modelValue.config = { ...this.modelValue.config };
+                 this.$fd.info('initializeConfig finished. Final modelValue.config for UI:', JSON.parse(JSON.stringify(this.modelValue.config)));
             }
         },
         async authenticateSpotify() {
@@ -234,54 +310,45 @@ export default {
             this.notifications.auth.show = true;
             
             try {
-                // Save the configuration first to ensure the backend has the latest credentials
+                // Save the configuration first to ensure the backend has the latest credentials AND LOG LEVEL
                 await this.saveConfig();
                 
                 // Send authentication request to the backend plugin
+                // The backend will use the config saved by saveConfig()
                 const response = await this.$fd.sendToBackend({
-                    data: 'spotify-auth',
-                    config: this.modelValue.config
+                    data: 'spotify-auth' 
+                    // No need to send config here if backend reads from its saved version
                 });
 
-                // Add null check for the response
                 if (!response) {
                     throw new Error("No response received from backend");
                 }
 
                 if (response.success) {
-                    // Get the updated config with tokens from backend
-                    const updatedConfig = await this.$fd.getConfig();
+                    const updatedConfigFromBackend = await this.$fd.getConfig();
+                    this.modelValue.config = { ...updatedConfigFromBackend }; // Update UI with latest, including tokens
+                    this.isAuthenticated = true; // This will be re-evaluated by checkAuthStatus via watcher
                     
-                    // Update our local model with the full config including tokens
-                    this.modelValue.config = updatedConfig;
-                    
-                    // Update authentication state
-                    this.isAuthenticated = true;
-                    
-                    // Show success notification
                     this.notifications.auth.message = response.message || "Successfully connected to Spotify!";
                     this.notifications.auth.color = "success";
                     this.notifications.auth.icon = "mdi-check-circle";
-                    this.notifications.auth.show = true;
                 } else {
                     throw new Error(response.error || "Authentication failed");
                 }
             } catch (error) {
                 this.$fd.error('Auth error:', error);
-                
-                // Show error notification
                 this.notifications.auth.message = `Could not connect to Spotify: ${error.message}`;
                 this.notifications.auth.color = "error";
                 this.notifications.auth.icon = "mdi-alert-circle";
-                this.notifications.auth.show = true;
+            } finally {
+                 this.notifications.auth.show = true; // Ensure snackbar shows for success or failure
+                 this.checkAuthStatus(); // Re-check auth status after operations
             }
         },
         async disconnectSpotify() {
+            this.$fd.info('Disconnecting Spotify...');
             try {
-                // Get current config
-                const currentConfig = await this.$fd.getConfig();
-                
-                // Create a new config without authentication data
+                const currentConfig = await this.$fd.getConfig() || {};
                 const updatedConfig = {
                     ...currentConfig,
                     isAuthenticated: false,
@@ -289,61 +356,63 @@ export default {
                     refreshToken: null
                 };
                 
-                // Save the updated config
                 await this.$fd.setConfig(updatedConfig);
-                
-                // Update the local model
-                this.modelValue.config = updatedConfig;
-                
-                // Reset UI state
-                this.isAuthenticated = false;
-                
-                // Show disconnection notification
+                this.modelValue.config = { ...updatedConfig };
+                // this.isAuthenticated will be updated by the watcher calling checkAuthStatus
+
                 this.notifications.auth.message = "Successfully disconnected from Spotify";
                 this.notifications.auth.color = "success";
                 this.notifications.auth.icon = "mdi-check-circle";
-                this.notifications.auth.show = true;
             } catch (error) {
                 this.$fd.error('Failed to disconnect:', error);
                 this.notifications.auth.message = `Error disconnecting: ${error.message}`;
                 this.notifications.auth.color = "error";
                 this.notifications.auth.icon = "mdi-alert-circle";
+            } finally {
                 this.notifications.auth.show = true;
+                this.checkAuthStatus(); // Re-check auth status
             }
         },
-        showError(error) {
-            // Check if this is an auth error
-            if (error.message && error.message.includes('authenticate')) {
-                this.isAuthenticated = false;
-                this.notifications.auth.message = "Authentication required. Please reconnect to Spotify.";
+        showError(error) { // This method seems to be for generic errors, might need context for auth specifically
+            this.$fd.error("showError called:", error.message)
+            if (error.message && (error.message.toLowerCase().includes('authenticate') || error.message.toLowerCase().includes('token'))) {
+                // this.isAuthenticated = false; // Let checkAuthStatus handle this
+                this.notifications.auth.message = "Authentication issue. Please check credentials or try reconnecting.";
                 this.notifications.auth.color = "warning";
                 this.notifications.auth.icon = "mdi-alert";
             } else {
-                this.notifications.auth.message = `Error: ${error.message}`;
+                this.notifications.auth.message = `Error: ${error.message || 'An unknown error occurred.'}`;
                 this.notifications.auth.color = "error";
                 this.notifications.auth.icon = "mdi-alert-circle";
             }
             this.notifications.auth.show = true;
+            this.checkAuthStatus(); // Re-check auth status
         },
         checkAuthStatus() {
-            // Check if we have valid authentication configuration
+            const wasAuthenticated = this.isAuthenticated;
             this.isAuthenticated = !!(
                 this.modelValue.config && 
                 this.modelValue.config.isAuthenticated &&
-                this.modelValue.config.accessToken &&
-                this.modelValue.config.refreshToken
+                this.modelValue.config.accessToken // refreshToken also good, but accessToken is primary for API calls
             );
-            this.$fd.info('Auth status checked:', this.isAuthenticated);
+            if (wasAuthenticated !== this.isAuthenticated) {
+                 this.$fd.info('Authentication status changed to:', this.isAuthenticated, 'from model config:', JSON.parse(JSON.stringify(this.modelValue.config)));
+            }
         },
     },
     created() {
-        this.$fd.info('Component created, modelValue:', this.modelValue);
+        this.$fd.info('Component created, initial modelValue on prop:', JSON.parse(JSON.stringify(this.modelValue)));
+        // Ensure modelValue.config is an object, especially on first load if modelValue is empty
+        if (!this.modelValue.config) {
+            this.modelValue.config = {}; // Initialize to prevent errors before initializeConfig runs
+        }
     },
     mounted() {
-        this.$fd.info('Component mounted, modelValue:', this.modelValue);
+        this.$fd.info('Component mounted, modelValue before init:', JSON.parse(JSON.stringify(this.modelValue)));
         
         this.initializeConfig().then(() => {
-            this.checkAuthStatus();
+            // checkAuthStatus is called by the watcher on modelValue.config change after initializeConfig
+            this.$fd.info('Component fully mounted, modelValue.config.logLevel after init:', this.modelValue.config ? this.modelValue.config.logLevel : 'config not set');
         });
     }
 };
@@ -353,5 +422,11 @@ export default {
 /* Add specific styles if needed */
 .v-card-item {
     padding-bottom: 12px; /* Adjust spacing */
+}
+
+.scrollable-config-container {
+  max-height: 100vh; 
+  overflow-y: auto;
+  padding-bottom: 16px; /* Ensure some padding at the very bottom when scrolled */
 }
 </style>

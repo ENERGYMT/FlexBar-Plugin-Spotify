@@ -2,11 +2,8 @@ name: Build, Test and Release
 
 on:
   push:
-    branches: [ master ]
     tags:
       - "v*"
-  pull_request:
-    branches: [ master ]
 
 jobs:
   build:
@@ -39,25 +36,53 @@ jobs:
     - name: Rename plugin for platform
       shell: bash
       run: |
-        if [[ $GITHUB_REF == refs/tags/* ]]; then
-          TAG=${GITHUB_REF#refs/tags/}
-        else
-          TAG=latest
-        fi
-        PLATFORM=${{ matrix.os }}
-        # Clean up platform name
-        case $PLATFORM in
-          "windows-latest") CLEAN_PLATFORM="windows" ;;
-          "macos-latest") CLEAN_PLATFORM="macos" ;;
-          "ubuntu-latest") CLEAN_PLATFORM="linux" ;;
+        # Get OS and Arch details
+        PLATFORM_OS_FROM_MATRIX="${{ matrix.os }}"
+        RUNNER_ARCH_RAW="${{ runner.arch }}" # This will be like X64, ARM64
+        PLATFORM_ARCH_LOWER=$(echo "$RUNNER_ARCH_RAW" | tr '[:upper:]' '[:lower:]') # Converts to x64, arm64
+
+        # Determine DOC_OS_NAME based on matrix.os (GitHub runner OS label)
+        # DOC_OS_NAME is the OS name as per FlexDesigner plugin spec (win32, darwin, linux)
+        DOC_OS_NAME=""
+        case "$PLATFORM_OS_FROM_MATRIX" in
+          "windows-latest") DOC_OS_NAME="win32" ;;
+          "macos-latest") DOC_OS_NAME="darwin" ;; # Note: macos-latest is currently x64.
+          "ubuntu-latest") DOC_OS_NAME="linux" ;;
+          *)
+            echo "::error::Unsupported OS in matrix: $PLATFORM_OS_FROM_MATRIX. Cannot determine DOC_OS_NAME."
+            exit 1
+            ;;
         esac
-        mv com.energy.spotify_integration.flexplugin "com.energy.spotify_integration-${CLEAN_PLATFORM}-${TAG}.flexplugin"
+
+        # The source filename, as output by 'npm run plugin:pack'
+        SOURCE_FILENAME="com.energy.spotify_integration.flexplugin"
+
+        # The target filename, following the convention: xxx.<OS_NAME>.<ARCH>.flexplugin
+        # Example: com.energy.spotify_integration.win32.x64.flexplugin
+        TARGET_FILENAME="com.energy.spotify_integration.${DOC_OS_NAME}.${PLATFORM_ARCH_LOWER}.flexplugin"
+
+        echo "Preparing to rename plugin..."
+        echo "Source OS from matrix: $PLATFORM_OS_FROM_MATRIX"
+        echo "Runner architecture: $RUNNER_ARCH_RAW (processed as $PLATFORM_ARCH_LOWER)"
+        echo "Mapped OS Name for plugin: $DOC_OS_NAME"
+        echo "Source filename: $SOURCE_FILENAME"
+        echo "Target filename: $TARGET_FILENAME"
+
+        if [ -f "$SOURCE_FILENAME" ]; then
+          mv "$SOURCE_FILENAME" "$TARGET_FILENAME"
+          echo "Successfully renamed '$SOURCE_FILENAME' to '$TARGET_FILENAME'"
+        else
+          echo "::error::Source file '$SOURCE_FILENAME' not found in current directory ($(pwd))."
+          echo "Files in current directory:"
+          ls -la
+          exit 1
+        fi
       
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: plugin-${{ matrix.os }}
-        path: com.energy.spotify_integration-*.flexplugin
+        name: plugin-${{ matrix.os }}-${{ runner.arch }}
+        path: com.energy.spotify_integration.*.*.flexplugin # Adjusted to match new naming, e.g., com.energy.spotify_integration.win32.x64.flexplugin
         compression-level: 0
 
   release:
