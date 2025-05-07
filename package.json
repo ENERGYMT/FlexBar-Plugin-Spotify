@@ -25,7 +25,7 @@
     "rollup-plugin-node-externals": "^8.0.0"
   },
   "dependencies": {
-    "@eniac/flexdesigner": "^1.0.1",
+    "@eniac/flexdesigner": "^1.0.4",
     "balanced-match": "^3.0.1",
     "brace-expansion": "^4.0.0",
     "decompress-response": "^9.0.0",
