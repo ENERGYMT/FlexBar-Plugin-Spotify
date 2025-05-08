@@ -826,4 +826,19 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 plugin.on('ready', async () => { 
     logger.info('Plugin ready');
+    await logger.updateLogLevelFromConfig();
+    
+    try {
+        logger.info('Attempting to initialize Spotify authentication...');
+        const authInitialized = await spotifyAuth.initializeAuthentication();
+        if (authInitialized) {
+            logger.info('Spotify authentication initialized successfully.');
+        } else {
+            logger.warn('Spotify authentication failed to initialize. User may need to authenticate manually.');
+        }
+    } catch (error) {
+        logger.error('Error during Spotify authentication initialization:', error);
+    }
+    
+    // TODO: Ensure other initializations (like spotifyAuth) happen after this or are also deferred.
 });

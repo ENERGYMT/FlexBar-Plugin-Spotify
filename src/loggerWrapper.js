@@ -59,11 +59,6 @@ async function _updateLogLevelFromConfig() {
   }
 }
 
-// Initial attempt to set log level from config when module loads.
-// Note: This is async. Logs before this completes will use the hardcoded default `currentConfiguredLogLevelName = 'INFO'`.
-// Your main plugin init logic should also call `loggerWrapper.updateLogLevelFromConfig()` to ensure it applies after full plugin init.
-_updateLogLevelFromConfig();
-
 
 // Wrapper functions
 const loggerWrapper = {
