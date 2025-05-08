@@ -4,3 +4,6 @@ logs
 .env
 package-lock.json
 com.energy.spotify_integration.plugin/backend
+
+# FlexBar Spotify Plugin runtime config
+com.energy.spotify_integration.plugin/config.json

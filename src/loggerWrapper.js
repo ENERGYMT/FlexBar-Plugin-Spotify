@@ -31,6 +31,7 @@ async function _updateLogLevelFromConfig() {
     const oldLogLevelName = currentConfiguredLogLevelName;
 
     if (config && typeof config.logLevel === 'string' && LOG_LEVELS.hasOwnProperty(config.logLevel.toUpperCase())) {
+      loggerWrapper.info(PLUGIN_PREFIX, `Updating log level from config. New level: ${config.logLevel}`);
       const newLevelName = config.logLevel.toUpperCase();
       currentConfiguredLogLevelName = newLevelName;
     } else {
