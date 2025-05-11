@@ -1,7 +1,5 @@
 const { plugin, pluginPath, resourcesPath } = require("@eniac/flexdesigner")
 const logger = require("./loggerWrapper")
-const path = require('path')
-const open = require('open')
 const { escapeXml } = require('./utils');
 const spotifyAuth = require('./spotifyAuth'); 
 const spotifyApi = require('./spotifyApi'); 
@@ -248,6 +246,11 @@ plugin.on('ui.message', async (payload) => { /* Original - No change needed here
     if (!spotifyAuth.getAuthenticationStatus()) {
         const initSuccess = await spotifyAuth.initializeAuthentication(); 
         if (!initSuccess) return { success: false, error: 'Auth required', needsAuth: true };
+    }
+    if (payload.data === 'update-log-level') {
+        logger.info('Received message to update log level:', payload);
+        logger.updateLogLevelFromConfig();
+        return { success: true, message: 'Log level updated.' };
     }
     try {
         switch (payload.data) {

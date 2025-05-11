@@ -244,6 +244,9 @@ export default {
                 
                 this.notifications.save.message = "Settings saved successfully";
                 this.notifications.save.show = true;
+                const response = await this.$fd.sendToBackend({
+                    data: 'update-log-level' 
+                });
             } catch (error) {
                 this.$fd.error('Failed to save config:', error);
                 this.notifications.auth.message = `Error saving config: ${error.message}`;

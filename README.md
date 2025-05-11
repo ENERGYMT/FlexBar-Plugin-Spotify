@@ -1,7 +1,7 @@
 # 🎵 Spotify Integration for FlexBar
 
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen)](https://nodejs.org/)
-[![FlexDesigner](https://img.shields.io/badge/FlexDesigner-v1.0.0%2B-blue)](https://flexbar.dev)
+[![FlexDesigner](https://img.shields.io/badge/FlexDesigner-v1.1.0%2B-blue)](https://eniacelec.com/pages/software)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A Spotify integration plugin for FlexBar that provides real-time music information display and "some" controls.
@@ -31,6 +31,23 @@ A Spotify integration plugin for FlexBar that provides real-time music informati
 ### 💫 Interactive Elements
 - Visual feedback for user interactions
 - Seamless integration with FlexBar UI
+
+### 📸 Screenshots
+
+Here's a look at the plugin in action:
+
+**Now Playing Tile:**
+
+*   Showing "Days Before Rodeo: The Prayer" by Travis Scott:
+    ![Now Playing - Travis Scott](resources/image1.png)
+
+*   Showing "I Can't Wait To Get There" by The Weeknd:
+    ![Now Playing - The Weeknd](resources/image2.png)
+
+**Key Settings UI:**
+
+*   Configuring update intervals, font sizes, progress bar color, and display options:
+    ![Key Settings UI](resources/FlexDesigner_settings.png)
 
 ## 💻 Installation for Development
 
