@@ -3,6 +3,7 @@
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen)](https://nodejs.org/)
 [![FlexDesigner](https://img.shields.io/badge/FlexDesigner-v1.1.0%2B-blue)](https://eniacelec.com/pages/software)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Platforms](https://img.shields.io/badge/Platforms-Windows%20%7C%20macOS%20%7C%20Linux-orange)](https://eniacelec.com/pages/software)
 
 A Spotify integration plugin for FlexBar that provides real-time music information display and "some" controls.
 
@@ -15,6 +16,7 @@ A Spotify integration plugin for FlexBar that provides real-time music informati
 - [Development](#development)
 - [Authentication](#authentication)
 - [Usage](#usage)
+- [Platform Support](#platform-support)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -54,7 +56,7 @@ Here's a look at the plugin in action:
 ### Prerequisites
 
 - **Node.js** 18 or later  
-- **FlexDesigner** v1.0.0 or later  
+- **FlexDesigner** v1.1.0 or later  
 - A **FlexBar** device 
 - Install **FlexCLI**:
   ```bash
@@ -134,6 +136,16 @@ Once installed and authenticated, the plugin provides several interactive keys:
 | Like/Unlike | Toggle to like or unlike the current track |
 
 Each key provides specific functionality and visual feedback for the current Spotify playback state.
+
+## 🖥️ Platform Support
+
+This plugin is compatible with:
+
+- **Windows 10+**
+- **macOS 10.15+** (Intel & Apple Silicon)
+- **Linux** (Ubuntu 20.04+ and other major distributions)
+
+The plugin uses skia-canvas for rendering, which includes native binaries for all supported platforms. During build, the appropriate platform-specific binaries are included in the plugin package.
 
 ## 👥 Contributing
 

@@ -9,10 +9,15 @@ import natives from 'rollup-plugin-natives';
 import nodeExternals from 'rollup-plugin-node-externals';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import os from 'node:os';
 
 const isWatching = !!process.env.ROLLUP_WATCH;
 const flexPlugin = "com.energy.spotify_integration.plugin";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Detect platform
+const platform = os.platform();
+console.log(`Building for platform: ${platform}`);
 
 /**
  * @type {import('rollup').RollupOptions}
@@ -31,7 +36,10 @@ const config = {
     json(),
     natives({
       copyTo: `${flexPlugin}/backend/native-modules`,
-      destDir: './native-modules'
+      destDir: './native-modules',
+      // Handle both mac/darwin (Intel & Apple Silicon), Windows, and Linux platforms
+      targetPlatform: platform,
+      disableWalking: false
     }),
     nodeExternals({
       deps: false,
@@ -60,7 +68,10 @@ const config = {
           'minipass',
           'yallist',
           'string-split-by',
-          'parenthesis'
+          'parenthesis',
+          '@mapbox/node-pre-gyp',
+          'path-browserify',
+          'cargo-cp-artifact'
         ];
         
         // Copy all modules
@@ -81,6 +92,23 @@ const config = {
             console.warn(`Warning: Could not find module ${moduleName} at ${srcDir}`);
           }
         });
+
+        // Ensure the v8 directory exists in the destination
+        const destV8Dir = path.resolve(__dirname, flexPlugin, 'backend', 'node_modules', 'skia-canvas', 'lib', 'v8');
+        if (!fs.existsSync(destV8Dir)) {
+          fs.mkdirSync(destV8Dir, { recursive: true });
+        }
+        
+        // Copy the native binary for skia-canvas
+        const srcNativeFile = path.resolve(__dirname, 'node_modules', 'skia-canvas', 'lib', 'v8', 'index.node');
+        const destNativeFile = path.resolve(destV8Dir, 'index.node');
+        
+        if (fs.existsSync(srcNativeFile)) {
+          fs.copyFileSync(srcNativeFile, destNativeFile);
+          console.log(`Copied skia-canvas native binary to ${destNativeFile}`);
+        } else {
+          console.warn(`Warning: Could not find skia-canvas native binary at ${srcNativeFile}`);
+        }
       }
     },
     {
