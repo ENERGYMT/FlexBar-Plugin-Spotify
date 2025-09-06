@@ -1,5 +1,6 @@
 const { plugin } = require("@eniac/flexdesigner");
 const auth = require('./spotifyAuth');
+const axios = require('axios');
 const logger = require("./loggerWrapper"); 
 
 // Basic Spotify API wrapper
@@ -30,13 +31,14 @@ const spotifyApi = {
 
         try {
             logger.debug(`Making Spotify API request: ${method} /${endpoint}`);
-            const response = await fetch(`https://api.spotify.com/v1/${endpoint}`, {
+            const response = await axios({
                 method,
+                url: `https://api.spotify.com/v1/${endpoint}`,
                 headers: {
                     'Authorization': `Bearer ${tokens.accessToken}`,
                     'Content-Type': 'application/json'
                 },
-                ...(body && { body: JSON.stringify(body) }) // Only add body if it exists
+                ...(body && { data: body }) // Only add body if it exists
             });
 
             if (response.status === 401) {
@@ -49,24 +51,18 @@ const spotifyApi = {
                     logger.info('Token refreshed, retrying API request...');
                     // Need to get the *new* token after refresh
                     tokens = auth.getTokens(); 
-                     const retryResponse = await fetch(`https://api.spotify.com/v1/${endpoint}`, {
+                     const retryResponse = await axios({
                          method,
+                         url: `https://api.spotify.com/v1/${endpoint}`,
                          headers: {
                              'Authorization': `Bearer ${tokens.accessToken}`,
                              'Content-Type': 'application/json'
                          },
-                         ...(body && { body: JSON.stringify(body) })
+                         ...(body && { data: body })
                      });
-                     
+
                      // Handle response after retry
-                     if (!retryResponse.ok) {
-                         const errorText = await retryResponse.text();
-                         logger.error(`Spotify API error after retry (${retryResponse.status}): ${errorText}`);
-                         throw new Error(`Spotify API error after retry: ${retryResponse.statusText} - ${errorText}`);
-                     }
-                     
-                     const retryText = await retryResponse.text();
-                     return retryText ? JSON.parse(retryText) : null;
+                     return retryResponse.data;
 
                 } else {
                     logger.error('Token refresh failed. Authentication required.');
@@ -80,34 +76,22 @@ const spotifyApi = {
                 return null; // No content to parse
             }
 
-            if (!response.ok) {
-                const errorText = await response.text();
+            if (response.status < 200 || response.status >= 300) {
                 let errorMessage = `Spotify API error (${response.status}): ${response.statusText}`;
                 try {
-                    const errorJson = JSON.parse(errorText);
-                    errorMessage = `${errorJson.error?.message || errorMessage} (Details: ${errorText})`;
+                    const errorData = response.data;
+                    if (errorData && errorData.error) {
+                        errorMessage = `${errorData.error.message || errorMessage}`;
+                    }
                 } catch (e) {
-                    errorMessage = `${errorMessage} - ${errorText}`;
+                    // If parsing fails, use the default error message
                 }
                 logger.error(`Spotify API request failed: ${errorMessage}. Endpoint: /${endpoint}`);
                 throw new Error(errorMessage);
             }
 
-            // Check if response body is empty before parsing JSON
-            const text = await response.text();
-            if (!text) {
-                logger.debug(`API request successful with empty response body. Endpoint: /${endpoint}`);
-                return null;
-            }
-
-            try {
-                const jsonData = JSON.parse(text);
-                logger.debug(`API request successful. Endpoint: /${endpoint}`);
-                return jsonData;
-            } catch (e) {
-                logger.error('Failed to parse Spotify API JSON response:', text);
-                throw new Error('Invalid JSON response from Spotify API');
-            }
+            logger.debug(`API request successful. Endpoint: /${endpoint}`);
+            return response.data;
         } catch (error) {
             // Log network errors or errors from the try block (like JSON parsing)
             logger.error(`Error during Spotify API call to /${endpoint}: ${error.message}`);
@@ -266,32 +250,27 @@ const spotifyApi = {
         }
 
         try {
-            const response = await fetch('https://accounts.spotify.com/api/token', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    // Correctly encode client ID and secret for Basic Auth
-                    'Authorization': 'Basic ' + Buffer.from(`${config.clientId}:${config.clientSecret}`).toString('base64')
-                },
-                body: new URLSearchParams({
+            const response = await axios.post('https://accounts.spotify.com/api/token',
+                new URLSearchParams({
                     grant_type: 'authorization_code',
                     code: code,
                     redirect_uri: config.redirectUri
-                })
-            });
-    
-            if (!response.ok) {
-                const errorText = await response.text();
-                logger.error(`Spotify token exchange error (${response.status}): ${errorText}`);
-                throw new Error(`Spotify token exchange failed: ${response.statusText} - ${errorText}`);
-            }
-    
-            const data = await response.json();
+                }).toString(),
+                {
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        // Correctly encode client ID and secret for Basic Auth
+                        'Authorization': 'Basic ' + Buffer.from(`${config.clientId}:${config.clientSecret}`).toString('base64')
+                    }
+                }
+            );
+
+            const data = response.data;
             logger.info("Authorization code grant successful.");
             return data; // Contains access_token, refresh_token, expires_in, etc.
 
         } catch (error) {
-             logger.error("Error during authorizationCodeGrant fetch:", error);
+             logger.error("Error during authorizationCodeGrant:", error);
              throw error; // Re-throw the error
         }
     }

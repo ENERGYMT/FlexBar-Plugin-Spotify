@@ -1,23 +1,18 @@
 import commonjs from "@rollup/plugin-commonjs";
 import nodeResolve from "@rollup/plugin-node-resolve";
 import terser from "@rollup/plugin-terser";
+import copy from "rollup-plugin-copy";
 import path from "node:path";
 import url from "node:url";
 import json from '@rollup/plugin-json';
 import { glob } from 'glob'
-import natives from 'rollup-plugin-natives';
-import nodeExternals from 'rollup-plugin-node-externals';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import os from 'node:os';
 
 const isWatching = !!process.env.ROLLUP_WATCH;
 const flexPlugin = "com.energy.spotify_integration.plugin";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Detect platform
-const platform = os.platform();
-console.log(`Building for platform: ${platform}`);
 
 /**
  * @type {import('rollup').RollupOptions}
@@ -34,83 +29,6 @@ const config = {
   },
   plugins: [
     json(),
-    natives({
-      copyTo: `${flexPlugin}/backend/native-modules`,
-      destDir: './native-modules',
-      // Handle both mac/darwin (Intel & Apple Silicon), Windows, and Linux platforms
-      targetPlatform: platform,
-      disableWalking: false
-    }),
-    nodeExternals({
-      deps: false,
-      devDeps: false,
-    }),
-    {
-      name: 'copy-modules',
-      buildEnd() {
-        // Main modules to copy
-        const moduleNames = ['skia-canvas'];
-        
-        // Additional dependencies needed by skia-canvas
-        const additionalDeps = [
-          'simple-get', 
-          'decompress-response', 
-          'once', 
-          'wrappy', 
-          'mimic-response',
-          'simple-concat',
-          'glob',
-          'minimatch',
-          'path-scurry',
-          'lru-cache',
-          'brace-expansion',
-          'balanced-match',
-          'minipass',
-          'yallist',
-          'string-split-by',
-          'parenthesis',
-          '@mapbox/node-pre-gyp',
-          'path-browserify',
-          'cargo-cp-artifact'
-        ];
-        
-        // Copy all modules
-        [...moduleNames, ...additionalDeps].forEach(moduleName => {
-          const srcDir = path.resolve(__dirname, 'node_modules', moduleName);
-          const destDir = path.resolve(__dirname, flexPlugin, 'backend', 'node_modules', moduleName);
-          
-          // Create destination directory
-          if (!fs.existsSync(destDir)) {
-            fs.mkdirSync(destDir, { recursive: true });
-          }
-          
-          // Copy the entire module directory
-          if (fs.existsSync(srcDir)) {
-            copyFolderRecursiveSync(srcDir, path.resolve(destDir, '..'));
-            console.log(`Copied ${moduleName} module to ${destDir}`);
-          } else {
-            console.warn(`Warning: Could not find module ${moduleName} at ${srcDir}`);
-          }
-        });
-
-        // Ensure the v8 directory exists in the destination
-        const destV8Dir = path.resolve(__dirname, flexPlugin, 'backend', 'node_modules', 'skia-canvas', 'lib', 'v8');
-        if (!fs.existsSync(destV8Dir)) {
-          fs.mkdirSync(destV8Dir, { recursive: true });
-        }
-        
-        // Copy the native binary for skia-canvas
-        const srcNativeFile = path.resolve(__dirname, 'node_modules', 'skia-canvas', 'lib', 'v8', 'index.node');
-        const destNativeFile = path.resolve(destV8Dir, 'index.node');
-        
-        if (fs.existsSync(srcNativeFile)) {
-          fs.copyFileSync(srcNativeFile, destNativeFile);
-          console.log(`Copied skia-canvas native binary to ${destNativeFile}`);
-        } else {
-          console.warn(`Warning: Could not find skia-canvas native binary at ${srcNativeFile}`);
-        }
-      }
-    },
     {
       name: "watch-externals",
       buildStart: function () {
@@ -121,6 +39,64 @@ const config = {
         });
       },
     },
+    copy({
+      targets: (() => {
+        const targets = [];
+
+        // Define all possible Canvas platform modules
+        const canvasPlatforms = [
+          'canvas-win32-x64-msvc',
+          'canvas-darwin-universal',
+          'canvas-darwin-x64',
+          'canvas-darwin-arm64',
+          'canvas-linux-x64-gnu',
+          'canvas-linux-arm64-gnu',
+          'canvas-linux-x64-musl',
+          'canvas-linux-arm64-musl'
+        ];
+
+        // Auto-detect and copy all available platform modules
+        for (const platform of canvasPlatforms) {
+          const modulePath = `node_modules/@napi-rs/${platform}`;
+
+          if (fs.existsSync(modulePath)) {
+            // Find .node files
+            try {
+              const files = fs.readdirSync(modulePath);
+              const nodeFile = files.find(f => f.endsWith('.node'));
+
+              if (nodeFile) {
+                // Copy .node file to backend root directory (relative path require)
+                targets.push({
+                  src: `${modulePath}/${nodeFile}`,
+                  dest: `${flexPlugin}/backend/`
+                });
+
+                // Copy icudtl.dat if exists
+                if (files.includes('icudtl.dat')) {
+                  targets.push({
+                    src: `${modulePath}/icudtl.dat`,
+                    dest: `${flexPlugin}/backend/`
+                  });
+                }
+
+                // Copy complete module (module path require)
+                targets.push({
+                  src: `${modulePath}/*`,
+                  dest: `${flexPlugin}/backend/node_modules/@napi-rs/${platform}/`
+                });
+              }
+            } catch (e) {
+              // Ignore read errors, continue with next platform
+              console.warn(`Warning: Could not process ${platform}: ${e.message}`);
+            }
+          }
+        }
+
+        console.log(`Canvas: Found ${targets.length / 3} platform(s) to copy`);
+        return targets;
+      })()
+    }),
     nodeResolve({
       browser: false,
       exportConditions: ["node"],
@@ -135,49 +111,26 @@ const config = {
       }
     }
   ],
-  external: [
-    'skia-canvas',
-    'canvas',
-    /\.node$/
-  ]
+  external: id => {
+    // All .node files must be externalized as Rollup cannot handle binary files
+    if (id.endsWith('.node')) {
+      return true;
+    }
+
+    // Externalize all napi-rs canvas platform-specific modules as they mainly contain .node files
+    if (id.startsWith('@napi-rs/canvas-')) {
+      return true;
+    }
+
+    // Externalize axios and express for Node.js runtime
+    if (id === 'axios' || id === 'express') {
+      return true;
+    }
+
+    // Other modules are not externalized by default
+    return false;
+  }
 };
 
-// Helper function to copy directories recursively
-function copyFolderRecursiveSync(source, destination) {
-  // Check if source exists
-  if (!fs.existsSync(source)) {
-    console.error(`Source directory not found: ${source}`);
-    return;
-  }
-
-  // Get the name of the directory
-  const folderName = path.basename(source);
-  const destFolderPath = path.join(destination, folderName);
-
-  // Create destination directory if it doesn't exist
-  if (!fs.existsSync(destFolderPath)) {
-    fs.mkdirSync(destFolderPath, { recursive: true });
-  }
-
-  // Read all files in the source directory
-  const items = fs.readdirSync(source);
-  
-  items.forEach(item => {
-    const sourcePath = path.join(source, item);
-    const destPath = path.join(destFolderPath, item);
-    
-    // Check if it's a file or directory
-    const stat = fs.statSync(sourcePath);
-    
-    if (stat.isFile()) {
-      // Copy the file
-      fs.copyFileSync(sourcePath, destPath);
-    } 
-    else if (stat.isDirectory()) {
-      // Recursively copy the directory
-      copyFolderRecursiveSync(sourcePath, destFolderPath);
-    }
-  });
-}
 
 export default config;

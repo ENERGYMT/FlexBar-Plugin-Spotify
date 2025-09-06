@@ -1,6 +1,7 @@
 const { plugin } = require("@eniac/flexdesigner");
 const open = require('open');
-const http = require('http');
+const axios = require('axios');
+const express = require('express');
 const logger = require("./loggerWrapper");
 
 // Store auth tokens locally within this module
@@ -75,14 +76,13 @@ async function initializeTokensFromConfigInternal() {
 
             // Check if token is valid by making a simple API call
             try {
-                const response = await fetch('https://api.spotify.com/v1/me', {
-                    method: 'GET',
+                const response = await axios.get('https://api.spotify.com/v1/me', {
                     headers: {
                         'Authorization': `Bearer ${spotifyTokens.accessToken}`
                     }
                 });
 
-                if (response.status === 401) {
+                if (response.status === 401 || response.status === 403) {
                     // Token expired, try to refresh it
                     logger.info('Token expired, attempting to refresh...');
                     const refreshSuccess = await refreshAccessTokenInternal(); // Use internal function
@@ -95,10 +95,10 @@ async function initializeTokensFromConfigInternal() {
                         logger.error('Failed to refresh token during initialization');
                         return false;
                     }
-                } else if (response.ok) {
+                } else if (response.status >= 200 && response.status < 300) {
                     isAuthenticated = true;
                     logger.info('Tokens validated successfully');
-                    
+
                     // Update config with isAuthenticated flag
                     try {
                         const updatedConfig = {
@@ -110,13 +110,17 @@ async function initializeTokensFromConfigInternal() {
                     } catch (configError) {
                         logger.error('Failed to update config with isAuthenticated flag:', configError);
                     }
-                    
+
                     setupTokenRefreshTimer(); // Setup timer with valid tokens
                     return true;
                 } else {
                     logger.error(`Token validation failed: ${response.status} ${response.statusText}`);
-                    const errorBody = await response.text();
-                    logger.error(`Response body: ${errorBody}`);
+                    try {
+                        const errorBody = response.data;
+                        logger.error(`Response body:`, errorBody);
+                    } catch (e) {
+                        logger.error(`Could not parse error response body`);
+                    }
                     isAuthenticated = false;
                     return false;
                 }
@@ -164,47 +168,20 @@ async function refreshAccessTokenInternal(retryCount = 0) {
             return false;
         }
 
-        const refreshResponse = await fetch('https://accounts.spotify.com/api/token', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Authorization': 'Basic ' + Buffer.from(config.clientId + ':' + config.clientSecret).toString('base64')
-            },
-            body: new URLSearchParams({
+        const refreshResponse = await axios.post('https://accounts.spotify.com/api/token',
+            new URLSearchParams({
                 grant_type: 'refresh_token',
                 refresh_token: spotifyTokens.refreshToken
-            })
-        });
-
-        if (!refreshResponse.ok) {
-            const errorText = await refreshResponse.text();
-            logger.error(`Failed to refresh token (${refreshResponse.status}): ${errorText}`);
-            isAuthenticated = false; // Assume failure means not authenticated
-
-            // Check if the error indicates an invalid refresh token
-             if (refreshResponse.status === 400 && errorText.includes("Invalid refresh token")) {
-                 logger.error("Refresh token is invalid. Clearing tokens and requiring re-authentication.");
-                 spotifyTokens.accessToken = null;
-                 spotifyTokens.refreshToken = null;
-                 // Clear tokens from config as well? Maybe safer not to automatically delete.
-                 // Consider adding a flag or message indicating re-auth is needed.
-                 await plugin.setConfig({...config, accessToken: null, refreshToken: null}); // Clear tokens in config too
-                 isAuthenticated = false;
-                 stopTokenRefresh(); // Stop the timer
-                 return false; // Don't retry if token is fundamentally invalid
-             }
-
-            // Retry logic for other errors
-            if (retryCount < maxRetries) {
-                logger.info(`Retrying token refresh in 3 seconds...`);
-                await new Promise(resolve => setTimeout(resolve, 3000));
-                return refreshAccessTokenInternal(retryCount + 1);
+            }).toString(),
+            {
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Authorization': 'Basic ' + Buffer.from(config.clientId + ':' + config.clientSecret).toString('base64')
+                }
             }
+        );
 
-            return false;
-        }
-
-        const refreshData = await refreshResponse.json();
+        const refreshData = refreshResponse.data;
 
         // Update local tokens
         spotifyTokens.accessToken = refreshData.access_token;
@@ -282,80 +259,74 @@ async function initiateUserAuthentication(spotifyApiInstance) {
              return reject(new Error("Spotify API instance with authorizationCodeGrant method is required."));
         }
 
-        let server; // Declare server variable outside the createServer scope
+        const app = express();
+        let server; // Declare server variable
 
         try {
-            server = http.createServer(async (req, res) => { // Make callback async
-                const currentUrl = new URL(req.url, `http://${req.headers.host}`);
+            app.get('/callback', async (req, res) => {
+                const code = req.query.code;
+                const error = req.query.error;
+                const state = req.query.state; // Optional: Handle state parameter if used
 
-                if (currentUrl.pathname === '/callback') {
-                    const code = currentUrl.searchParams.get('code');
-                    const error = currentUrl.searchParams.get('error');
-                    const state = currentUrl.searchParams.get('state'); // Optional: Handle state parameter if used
+                if (error) {
+                    logger.error(`Spotify auth error from callback: ${error}`);
+                    res.status(500).send(`<h1>Authentication Failed: ${error}. Please try again.</h1>`);
+                    server.close(() => logger.info("Auth server closed due to callback error."));
+                    isAuthenticated = false;
+                    return reject(new Error(`Spotify authentication error: ${error}`));
+                }
 
-                    if (error) {
-                        logger.error(`Spotify auth error from callback: ${error}`);
-                        res.writeHead(500, { 'Content-Type': 'text/html' });
-                        res.end(`<h1>Authentication Failed: ${error}. Please try again.</h1>`);
-                        server.close(() => logger.info("Auth server closed due to callback error."));
+                if (code) {
+                    try {
+                         // Exchange code for tokens using the passed spotifyApiInstance
+                        const data = await spotifyApiInstance.authorizationCodeGrant(code);
+
+                        spotifyTokens.accessToken = data.access_token;
+                        spotifyTokens.refreshToken = data.refresh_token;
+
+                        // Update config with new tokens
+                        const currentConfig = await plugin.getConfig(); // Re-fetch in case changed
+                        const updatedConfig = {
+                            ...currentConfig,
+                            accessToken: spotifyTokens.accessToken,
+                            refreshToken: spotifyTokens.refreshToken,
+                            isAuthenticated: true
+                        };
+
+                        // Save to config
+                        await plugin.setConfig(updatedConfig);
+                        logger.info('Tokens saved to config after auth code grant');
+
+                        // Set authenticated flag
+                        isAuthenticated = true;
+
+                        // Set up token refresh timer
+                        setupTokenRefreshTimer();
+
+                        res.send('<h1>Authentication successful! You can close this window.</h1>');
+                        server.close(() => logger.info("Auth server closed after successful authentication."));
+                        resolve(true);
+                    } catch (grantError) {
+                        logger.error('Auth code grant error:', grantError);
+                        res.status(500).send('<h1>Authentication failed during token exchange. Please check logs and try again.</h1>');
+                         server.close(() => logger.info("Auth server closed due to grant error."));
                         isAuthenticated = false;
-                        return reject(new Error(`Spotify authentication error: ${error}`));
-                    }
-
-                    if (code) {
-                        try {
-                             // Exchange code for tokens using the passed spotifyApiInstance
-                            const data = await spotifyApiInstance.authorizationCodeGrant(code);
-                                
-                            spotifyTokens.accessToken = data.access_token;
-                            spotifyTokens.refreshToken = data.refresh_token;
-    
-                            // Update config with new tokens
-                            const currentConfig = await plugin.getConfig(); // Re-fetch in case changed
-                            const updatedConfig = {
-                                ...currentConfig,
-                                accessToken: spotifyTokens.accessToken,
-                                refreshToken: spotifyTokens.refreshToken,
-                                isAuthenticated: true
-                            };
-    
-                            // Save to config
-                            await plugin.setConfig(updatedConfig);
-                            logger.info('Tokens saved to config after auth code grant');
-    
-                            // Set authenticated flag
-                            isAuthenticated = true;
-    
-                            // Set up token refresh timer
-                            setupTokenRefreshTimer();
-    
-                            res.writeHead(200, { 'Content-Type': 'text/html' });
-                            res.end('<h1>Authentication successful! You can close this window.</h1>');
-                            server.close(() => logger.info("Auth server closed after successful authentication."));
-                            resolve(true);
-                        } catch (grantError) {
-                            logger.error('Auth code grant error:', grantError);
-                            res.writeHead(500, { 'Content-Type': 'text/html' });
-                            res.end('<h1>Authentication failed during token exchange. Please check logs and try again.</h1>');
-                             server.close(() => logger.info("Auth server closed due to grant error."));
-                            isAuthenticated = false;
-                            reject(grantError);
-                        }
-                    } else {
-                        res.writeHead(400, { 'Content-Type': 'text/html' });
-                        res.end('<h1>Missing authorization code. Please try again.</h1>');
-                        server.close(() => logger.info("Auth server closed due to missing code."));
-                        isAuthenticated = false;
-                        reject(new Error('Missing authorization code in callback'));
+                        reject(grantError);
                     }
                 } else {
-                    // Handle other paths - respond with 404
-                    res.writeHead(404, { 'Content-Type': 'text/html' });
-                    res.end('<h1>Not Found</h1>');
+                    res.status(400).send('<h1>Missing authorization code. Please try again.</h1>');
+                    server.close(() => logger.info("Auth server closed due to missing code."));
+                    isAuthenticated = false;
+                    reject(new Error('Missing authorization code in callback'));
                 }
             });
 
-            server.listen(8888, () => {
+            // Handle other paths - respond with 404
+            app.use((req, res) => {
+                res.status(404).send('<h1>Not Found</h1>');
+            });
+
+            server = app.listen(8888, () => {
                 logger.info('Auth callback server listening on port 8888');
                 const scopes = 'user-read-playback-state user-modify-playback-state user-read-currently-playing user-library-read';
                 // Consider adding state parameter for security:

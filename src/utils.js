@@ -1,4 +1,4 @@
-const { Canvas } = require('skia-canvas');
+const { Canvas } = require('@napi-rs/canvas');
 const createCanvas = (width, height) => new Canvas(width, height);
 const { logger } = require("@eniac/flexdesigner"); // Assuming logger is needed, maybe not
 
